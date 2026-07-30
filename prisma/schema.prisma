@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Swap to "postgresql" (or "mysql") for production and point
+  // DATABASE_URL at your managed instance. No field types below are
+  // SQLite-specific, so this is a one-line change.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Shop {
+  id             String    @id @default(cuid())
+  // Shop host as returned by EasyStore (host_url on OAuth callback),
+  // e.g. "mystore.easystore.co" — also the {shop} used in Admin API calls.
+  domain         String    @unique
+  accessToken    String
+  scope          String
+  // Store's own default/source language, e.g. "en".
+  sourceLocale   String    @default("en")
+  // JSON-encoded string[] of locale codes the merchant has enabled
+  // for translation, e.g. ["ms","zh-CN","ja"]. Stored as JSON text
+  // rather than a native array column so this schema stays portable
+  // across SQLite/Postgres/MySQL.
+  enabledLocales String    @default("[]")
+  autoDetect     Boolean   @default(true)
+  installedAt    DateTime  @default(now())
+  uninstalledAt  DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  translations Translation[]
+}
+
+model Translation {
+  id             String   @id @default(cuid())
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shopId         String
+  locale         String
+  // sha256 of the trimmed source text, used as the cache key so
+  // identical strings (e.g. repeated on many pages) are translated once.
+  sourceHash     String
+  sourceText     String
+  translatedText String
+  createdAt      DateTime @default(now())
+
+  @@unique([shopId, locale, sourceHash])
+  @@index([shopId, locale])
+}

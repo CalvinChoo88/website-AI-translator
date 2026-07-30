@@ -1,0 +1,30 @@
+{
+  "name": "easystore-website-translator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "next": "^16.2.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "prisma": "^5.20.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
