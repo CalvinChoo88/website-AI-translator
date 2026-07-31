@@ -1,7 +1,8 @@
 # Website Translator for EasyStore
 
 An EasyStore app that translates a storefront into most languages in the
-world (~130, via Google Cloud Translation). Shoppers get a language
+world (~130, via Azure AI Translator by default — free up to 2M
+characters/month, indefinitely). Shoppers get a language
 dropdown; if the merchant enables auto-detect, it's pre-selected based on
 the shopper's approximate country and can always be changed — the choice
 is then remembered in a cookie instead of being re-detected every visit.
@@ -23,9 +24,11 @@ geo-aware site, and can override it in the dropdown either way.
   `prisma/schema.prisma` + `DATABASE_URL` for Postgres/MySQL in
   production (no provider-specific types are used, so this is a one-line
   change).
-- Google Cloud Translation API (v2, REST, API-key auth) behind a
-  `TranslationProvider` interface (`src/lib/translation/`) — swap in
-  another provider by implementing that interface.
+- Azure AI Translator (v3.0, REST, subscription-key auth) as the
+  default translation backend, behind a `TranslationProvider` interface
+  (`src/lib/translation/`) — swap providers via `TRANSLATION_PROVIDER`.
+  Google Cloud Translation is also implemented and selectable the same
+  way if you'd rather pay for higher quality on fewer languages.
 - A vanilla-JS storefront widget (`public/widget/translator.js`, no
   build step, no framework dependency) that merchants embed with one
   `<script>` tag.
@@ -72,8 +75,10 @@ npm run dev
 | `EASYSTORE_SCOPES` | Comma-separated scopes — **verify exact scope names** against https://developers.easystore.co/docs/api/getting-started/scopes before launch; that page 403'd during development so the `.env.example` default is a best guess (`read_products,read_content,read_store`) |
 | `APP_URL` | Public base URL of this deployment; must match the redirect URL registered in the Partner Dashboard |
 | `SESSION_SECRET` | Random secret for the admin session cookie (`openssl rand -hex 32`) |
-| `TRANSLATION_PROVIDER` | `google` (only implemented provider today) |
-| `GOOGLE_TRANSLATE_API_KEY` | Google Cloud Translation API key |
+| `TRANSLATION_PROVIDER` | `azure` (default) or `google` |
+| `AZURE_TRANSLATOR_KEY` | Azure AI Translator subscription key (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
+| `AZURE_TRANSLATOR_REGION` | Only required for a *regional* Translator resource — leave blank if you created a "Global" resource |
+| `GOOGLE_TRANSLATE_API_KEY` | Only needed if `TRANSLATION_PROVIDER=google` |
 | `GEOIP_FALLBACK_API_URL` | Used only off-Vercel, where the `x-vercel-ip-country` header isn't available |
 
 ### Partner Dashboard setup
@@ -105,6 +110,19 @@ production):
 
 ## Known limitations / next steps
 
+- **Azure language-code coverage is not fully verified.** The language
+  catalog (`src/lib/languages.ts`) uses Google Translate-style codes;
+  `src/lib/translation/azure.ts` maps the handful of confirmed
+  divergences (`zh-CN`→`zh-Hans`, `zh-TW`→`zh-Hant`, `no`→`nb`) and
+  passes everything else through unchanged, which is correct for the
+  vast majority of languages. Azure's docs 403'd during development, so
+  the full ~130-language list hasn't been cross-checked against Azure's
+  actual supported-language list one-by-one — a few of the more niche
+  regional languages in the picker (e.g. Konkani, Krio, Latin) may not
+  have Azure equivalents and would error if enabled. Before launch,
+  either verify each enabled language against
+  https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support
+  or have merchants smoke-test each language they turn on.
 - The widget does whole-page client-side text-node translation (like
   Weglot/GTranslate-style widgets), not server-rendered locale routes —
   simplest to ship without needing EasyStore theme-asset APIs, but it
