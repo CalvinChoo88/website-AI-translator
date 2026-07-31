@@ -24,10 +24,10 @@ geo-aware site, and can override it in the dropdown either way.
 
 - Next.js 16 (App Router) + TypeScript, deployable as a single service
   (e.g. Vercel).
-- Prisma ORM. SQLite locally by default; swap `provider` in
-  `prisma/schema.prisma` + `DATABASE_URL` for Postgres/MySQL in
-  production (no provider-specific types are used, so this is a one-line
-  change).
+- Prisma ORM targeting Postgres (required — no field types are
+  provider-specific, so switching to MySQL is still just the `provider`
+  line in `prisma/schema.prisma`, but Postgres is what's set up and
+  what Vercel's Storage integrations offer).
 - DeepL API (v2, REST, `DeepL-Auth-Key` auth) as the default translation
   backend, behind a `TranslationProvider` interface (`src/lib/translation/`)
   — swap providers via `TRANSLATION_PROVIDER`. Azure AI Translator and
@@ -67,10 +67,13 @@ geo-aware site, and can override it in the dropdown either way.
 
 ## Setup
 
+Requires a reachable Postgres instance (local Docker container, or a
+free Neon/Supabase project — no SQLite fallback, see "Stack" above).
+
 ```bash
-cp .env.example .env   # fill in the values below
+cp .env.example .env   # fill in the values below, including a real DATABASE_URL
 npm install
-npx prisma migrate dev --name init
+npx prisma migrate deploy   # applies prisma/migrations/ to your database
 npm run dev
 ```
 
@@ -78,7 +81,7 @@ npm run dev
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Prisma connection string |
+| `DATABASE_URL` | Postgres connection string. On Vercel, whichever storage integration you attach injects its own env var name (e.g. `POSTGRES_PRISMA_URL`) — copy that value into a `DATABASE_URL` entry so Prisma picks it up |
 | `EASYSTORE_CLIENT_ID` / `EASYSTORE_CLIENT_SECRET` | From Partner Dashboard > Apps > your app's overview page |
 | `EASYSTORE_SCOPES` | Comma-separated scopes — **verify exact scope names** against https://developers.easystore.co/docs/api/getting-started/scopes before launch; that page 403'd during development so the `.env.example` default is a best guess (`read_products,read_content,read_store`) |
 | `APP_URL` | Public base URL of this deployment; must match the redirect URL registered in the Partner Dashboard |
@@ -97,6 +100,30 @@ npm run dev
 3. Register a webhook for topic `app/uninstalled` pointing at
    `{APP_URL}/api/webhooks/app-uninstalled`.
 4. Install the app from a development store to test the OAuth flow.
+
+## Deploying to Vercel
+
+1. **Deploy the app** to get a live URL (e.g. `https://your-app.vercel.app`).
+   At this point it'll build and serve static pages fine, but nothing
+   that touches the database or EasyStore will work yet — that's expected.
+2. **Attach a Postgres database** via the project's **Storage** tab
+   (Vercel Postgres, or the Neon/Supabase marketplace integrations all
+   work). Copy the connection string it gives you into a `DATABASE_URL`
+   environment variable under **Settings → Environment Variables** (the
+   integration usually injects a differently-named var — see the table
+   above).
+3. **Apply the schema once**: `npx prisma migrate deploy` doesn't run
+   automatically on every build (deliberately — it would fail the very
+   first deploy, before any database is attached). Run it once yourself
+   against the new database: `vercel env pull .env.production.local`
+   then `npx prisma migrate deploy` locally, using that pulled env file.
+4. **Create the app in EasyStore's Partner Dashboard** (see below),
+   using your real Vercel URL for the App URL and
+   `{your-url}/api/auth/callback` for the Redirect URL.
+5. **Add the remaining environment variables** (`EASYSTORE_CLIENT_ID`,
+   `EASYSTORE_CLIENT_SECRET`, `EASYSTORE_SCOPES`, `APP_URL` set to your
+   real Vercel URL, `SESSION_SECRET`, `DEEPL_API_KEY`) in Vercel's
+   Environment Variables settings, then redeploy so they take effect.
 
 ## Things verified vs. assumed
 

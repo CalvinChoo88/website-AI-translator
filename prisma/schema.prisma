@@ -3,10 +3,7 @@ generator client {
 }
 
 datasource db {
-  // Swap to "postgresql" (or "mysql") for production and point
-  // DATABASE_URL at your managed instance. No field types below are
-  // SQLite-specific, so this is a one-line change.
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
