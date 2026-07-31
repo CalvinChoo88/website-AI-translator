@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionShop } from "@/lib/adminAuth";
 import { isSupportedLocale } from "@/lib/languages";
+import { getTranslationProviderName, getProviderSupportedLocales } from "@/lib/translation";
 
 export async function GET() {
   const shop = await getSessionShop();
@@ -12,6 +13,9 @@ export async function GET() {
     sourceLocale: shop.sourceLocale,
     enabledLocales: JSON.parse(shop.enabledLocales || "[]") as string[],
     autoDetect: shop.autoDetect,
+    provider: getTranslationProviderName(),
+    // null means "no extra restriction beyond the full catalog"
+    providerSupportedLocales: getProviderSupportedLocales(),
   });
 }
 
@@ -26,10 +30,17 @@ export async function POST(req: NextRequest) {
   if (!shop) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = (await req.json()) as SettingsBody;
+  const providerSupported = getProviderSupportedLocales();
 
   if (body.enabledLocales !== undefined) {
-    if (!Array.isArray(body.enabledLocales) || !body.enabledLocales.every(isSupportedLocale)) {
-      return NextResponse.json({ error: "enabledLocales contains an unsupported locale" }, { status: 400 });
+    const allSupported = body.enabledLocales.every(
+      (code) => isSupportedLocale(code) && (!providerSupported || providerSupported.includes(code)),
+    );
+    if (!Array.isArray(body.enabledLocales) || !allSupported) {
+      return NextResponse.json(
+        { error: "enabledLocales contains a locale the active translation provider doesn't support" },
+        { status: 400 },
+      );
     }
   }
   if (body.sourceLocale !== undefined && !isSupportedLocale(body.sourceLocale)) {

@@ -1,4 +1,5 @@
 import { getSessionShop } from "@/lib/adminAuth";
+import { getProviderSupportedLocales } from "@/lib/translation";
 import { AdminSettingsForm } from "./AdminSettingsForm";
 
 export default async function AdminPage() {
@@ -22,6 +23,7 @@ export default async function AdminPage() {
       initialSourceLocale={shop.sourceLocale}
       initialEnabledLocales={JSON.parse(shop.enabledLocales || "[]")}
       initialAutoDetect={shop.autoDetect}
+      providerSupportedLocales={getProviderSupportedLocales()}
     />
   );
 }

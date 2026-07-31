@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { corsJson, corsPreflight } from "@/lib/cors";
 import { translateBatchCached } from "@/lib/translation/cache";
+import { getProviderSupportedLocales } from "@/lib/translation";
 
 export function OPTIONS() {
   return corsPreflight();
@@ -56,7 +57,8 @@ export async function POST(req: NextRequest) {
   }
 
   const enabledCodes: string[] = JSON.parse(shop.enabledLocales || "[]");
-  if (!enabledCodes.includes(locale)) {
+  const providerSupported = getProviderSupportedLocales();
+  if (!enabledCodes.includes(locale) || (providerSupported && !providerSupported.includes(locale))) {
     return corsJson({ error: "Locale not enabled for this shop" }, { status: 400 });
   }
 

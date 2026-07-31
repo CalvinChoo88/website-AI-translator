@@ -1,11 +1,15 @@
 # Website Translator for EasyStore
 
 An EasyStore app that translates a storefront into most languages in the
-world (~130, via Azure AI Translator by default — free up to 2M
-characters/month, indefinitely). Shoppers get a language
-dropdown; if the merchant enables auto-detect, it's pre-selected based on
-the shopper's approximate country and can always be changed — the choice
-is then remembered in a cookie instead of being re-detected every visit.
+world. Translation runs on DeepL by default (free up to 500K
+characters/month, indefinitely; ~35 languages) — Azure AI Translator and
+Google Cloud Translation are also implemented (~130 languages each,
+free/paid respectively) and selectable via env var if broader coverage
+matters more than DeepL's generally higher translation quality. Shoppers
+get a language dropdown; if the merchant enables auto-detect, it's
+pre-selected based on the shopper's approximate country and can always be
+changed — the choice is then remembered in a cookie instead of being
+re-detected every visit.
 
 **On IP/VPN detection:** this app detects the visitor's *apparent* country
 (via Vercel's edge geolocation or a geo-IP lookup on the request IP) the
@@ -24,11 +28,11 @@ geo-aware site, and can override it in the dropdown either way.
   `prisma/schema.prisma` + `DATABASE_URL` for Postgres/MySQL in
   production (no provider-specific types are used, so this is a one-line
   change).
-- Azure AI Translator (v3.0, REST, subscription-key auth) as the
-  default translation backend, behind a `TranslationProvider` interface
-  (`src/lib/translation/`) — swap providers via `TRANSLATION_PROVIDER`.
-  Google Cloud Translation is also implemented and selectable the same
-  way if you'd rather pay for higher quality on fewer languages.
+- DeepL API (v2, REST, `DeepL-Auth-Key` auth) as the default translation
+  backend, behind a `TranslationProvider` interface (`src/lib/translation/`)
+  — swap providers via `TRANSLATION_PROVIDER`. Azure AI Translator and
+  Google Cloud Translation are also implemented and selectable the same
+  way for broader language coverage.
 - A vanilla-JS storefront widget (`public/widget/translator.js`, no
   build step, no framework dependency) that merchants embed with one
   `<script>` tag.
@@ -43,8 +47,12 @@ geo-aware site, and can override it in the dropdown either way.
 2. **Admin settings** (`/admin`) — merchant picks which languages to
    offer and whether to auto-suggest by location; settings are saved via
    `/api/admin/settings` (protected by a signed session cookie issued at
-   OAuth callback). The page also renders the exact `<script>` snippet
-   to paste into the theme.
+   OAuth callback). The language picker (and the settings API's
+   validation) automatically restricts itself to whatever the active
+   `TRANSLATION_PROVIDER` actually supports — e.g. DeepL's ~35 languages
+   rather than the full ~130-language catalog — so a merchant can never
+   enable a language the provider would just error on. The page also
+   renders the exact `<script>` snippet to paste into the theme.
 3. **Storefront widget** — once embedded, it calls
    `/api/widget/config?shop=...` for the merchant's enabled languages
    and a geo-based suggestion, renders a language dropdown, and on
@@ -75,9 +83,10 @@ npm run dev
 | `EASYSTORE_SCOPES` | Comma-separated scopes — **verify exact scope names** against https://developers.easystore.co/docs/api/getting-started/scopes before launch; that page 403'd during development so the `.env.example` default is a best guess (`read_products,read_content,read_store`) |
 | `APP_URL` | Public base URL of this deployment; must match the redirect URL registered in the Partner Dashboard |
 | `SESSION_SECRET` | Random secret for the admin session cookie (`openssl rand -hex 32`) |
-| `TRANSLATION_PROVIDER` | `azure` (default) or `google` |
-| `AZURE_TRANSLATOR_KEY` | Azure AI Translator subscription key (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
-| `AZURE_TRANSLATOR_REGION` | Only required for a *regional* Translator resource — leave blank if you created a "Global" resource |
+| `TRANSLATION_PROVIDER` | `deepl` (default), `azure`, or `google` |
+| `DEEPL_API_KEY` | DeepL API key from https://www.deepl.com/pro-api — free tier = 500K chars/month. Free-tier keys end in `:fx`; the app auto-selects the free vs. pro endpoint from that suffix |
+| `AZURE_TRANSLATOR_KEY` | Only needed if `TRANSLATION_PROVIDER=azure` (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
+| `AZURE_TRANSLATOR_REGION` | Only required for a *regional* Azure Translator resource — leave blank for a "Global" resource |
 | `GOOGLE_TRANSLATE_API_KEY` | Only needed if `TRANSLATION_PROVIDER=google` |
 | `GEOIP_FALLBACK_API_URL` | Used only off-Vercel, where the `x-vercel-ip-country` header isn't available |
 
@@ -110,19 +119,26 @@ production):
 
 ## Known limitations / next steps
 
-- **Azure language-code coverage is not fully verified.** The language
-  catalog (`src/lib/languages.ts`) uses Google Translate-style codes;
-  `src/lib/translation/azure.ts` maps the handful of confirmed
-  divergences (`zh-CN`→`zh-Hans`, `zh-TW`→`zh-Hant`, `no`→`nb`) and
-  passes everything else through unchanged, which is correct for the
-  vast majority of languages. Azure's docs 403'd during development, so
-  the full ~130-language list hasn't been cross-checked against Azure's
-  actual supported-language list one-by-one — a few of the more niche
-  regional languages in the picker (e.g. Konkani, Krio, Latin) may not
-  have Azure equivalents and would error if enabled. Before launch,
-  either verify each enabled language against
-  https://learn.microsoft.com/en-us/azure/ai-services/translator/language-support
-  or have merchants smoke-test each language they turn on.
+- **DeepL trades coverage for quality.** DeepL supports ~35 languages
+  vs. ~130 for Azure/Google — the admin picker and both API routes
+  (`/api/admin/settings`, `/api/translate`, `/api/widget/config`)
+  enforce this automatically via `getProviderSupportedLocales()`
+  (`src/lib/translation/index.ts`), so a merchant can never enable —
+  and the widget can never request — a language DeepL doesn't support.
+  If a store needs "most languages in the world" over translation
+  quality, switch `TRANSLATION_PROVIDER` to `azure` or `google`.
+- **DeepL's supported-language list (`src/lib/translation/deepl.ts`)
+  and locale-code mapping aren't exhaustively verified.** DeepL's docs
+  403'd during development; the list of ~32 languages and their codes
+  (including the required target-language variants for English/
+  Portuguese/Chinese — DeepL rejects plain `EN`/`PT`/`ZH` as a target)
+  came from search-indexed excerpts of
+  https://developers.deepl.com/docs/getting-started/supported-languages.
+  Re-check against the live docs before launch, and note DeepL adds
+  languages over time so this list will also go stale.
+- Azure's language-code mapping (`src/lib/translation/azure.ts`) has
+  the same caveat for its handful of confirmed divergences
+  (`zh-CN`→`zh-Hans`, `zh-TW`→`zh-Hant`, `no`→`nb`) if you switch to it.
 - The widget does whole-page client-side text-node translation (like
   Weglot/GTranslate-style widgets), not server-rendered locale routes —
   simplest to ship without needing EasyStore theme-asset APIs, but it

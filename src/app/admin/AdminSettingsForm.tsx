@@ -8,6 +8,8 @@ interface Props {
   initialSourceLocale: string;
   initialEnabledLocales: string[];
   initialAutoDetect: boolean;
+  /** null = provider supports the full catalog, no filtering needed. */
+  providerSupportedLocales: string[] | null;
 }
 
 export function AdminSettingsForm({
@@ -15,17 +17,25 @@ export function AdminSettingsForm({
   initialSourceLocale,
   initialEnabledLocales,
   initialAutoDetect,
+  providerSupportedLocales,
 }: Props) {
   const [sourceLocale] = useState(initialSourceLocale);
-  const [enabled, setEnabled] = useState<Set<string>>(new Set(initialEnabledLocales));
+  const supportedSet = useMemo(
+    () => (providerSupportedLocales ? new Set(providerSupportedLocales) : null),
+    [providerSupportedLocales],
+  );
+  const [enabled, setEnabled] = useState<Set<string>>(
+    () => new Set(initialEnabledLocales.filter((c) => !supportedSet || supportedSet.has(c))),
+  );
   const [autoDetect, setAutoDetect] = useState(initialAutoDetect);
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [copied, setCopied] = useState(false);
 
   const selectableLanguages = useMemo(
-    () => LANGUAGES.filter((l) => l.code !== sourceLocale),
-    [sourceLocale],
+    () =>
+      LANGUAGES.filter((l) => l.code !== sourceLocale && (!supportedSet || supportedSet.has(l.code))),
+    [sourceLocale, supportedSet],
   );
 
   const visibleLanguages = useMemo(() => {
@@ -92,6 +102,11 @@ export function AdminSettingsForm({
 
       <section>
         <h2 style={{ fontSize: 18 }}>Languages to offer</h2>
+        {supportedSet && (
+          <p style={{ color: "#777", fontSize: 13, marginTop: -4 }}>
+            Showing the {supportedSet.size} languages your translation provider supports.
+          </p>
+        )}
         <input
           type="text"
           placeholder="Search languages…"

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { corsJson, corsPreflight } from "@/lib/cors";
 import { detectCountry, defaultLocaleForCountry } from "@/lib/geo";
 import { LANGUAGES, getLanguageName } from "@/lib/languages";
+import { getProviderSupportedLocales } from "@/lib/translation";
 
 export function OPTIONS() {
   return corsPreflight();
@@ -27,7 +28,13 @@ export async function GET(req: NextRequest) {
     return corsJson({ error: "Unknown or uninstalled shop" }, { status: 404 });
   }
 
-  const enabledCodes: string[] = JSON.parse(shop.enabledLocales || "[]");
+  // Filtered against the *current* provider's supported locales, not
+  // just what was saved — covers the case where TRANSLATION_PROVIDER
+  // changed after a merchant already enabled languages under a
+  // previous, broader-coverage provider.
+  const providerSupported = getProviderSupportedLocales();
+  const savedCodes: string[] = JSON.parse(shop.enabledLocales || "[]");
+  const enabledCodes = savedCodes.filter((c) => !providerSupported || providerSupported.includes(c));
   const enabledLocales = enabledCodes
     .map((code) => ({ code, name: getLanguageName(code) ?? code }))
     .filter((l) => LANGUAGES.some((lang) => lang.code === l.code));
