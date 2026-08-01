@@ -13,6 +13,9 @@
  *    on every visit.
  *  - Translates visible text on the page by batching text nodes to the
  *    app's /api/translate endpoint (server-side cached per shop+locale).
+ *    Also translates input/textarea placeholder text (e.g. "First name"),
+ *    which lives in an attribute rather than a text node and needs its
+ *    own capture/apply path.
  *  - Watches for content added to the page after load (e.g. a checkout
  *    step that renders its form client-side a moment after page load)
  *    and translates that too, rather than only translating a one-time
@@ -102,6 +105,50 @@
     });
   }
 
+  // Input/textarea placeholder text lives in an attribute, not a text
+  // node, so the TreeWalker above never sees it — it needs its own
+  // capture/translate/restore path.
+  var originalPlaceholder = new WeakMap();
+  var placeholderElements = [];
+
+  function isTranslatableElement(el) {
+    if (el.closest("[data-no-translate]")) return false;
+    if (el.closest("#estranslate-widget")) return false;
+    return true;
+  }
+
+  function collectPlaceholderElements(root) {
+    var elements = [];
+    if (root.matches && root.matches("input[placeholder], textarea[placeholder]") && isTranslatableElement(root)) {
+      elements.push(root);
+    }
+    if (root.querySelectorAll) {
+      var found = root.querySelectorAll("input[placeholder], textarea[placeholder]");
+      for (var i = 0; i < found.length; i++) {
+        if (found[i].getAttribute("placeholder").trim() && isTranslatableElement(found[i])) {
+          elements.push(found[i]);
+        }
+      }
+    }
+    return elements;
+  }
+
+  function capturePlaceholders(elements) {
+    elements.forEach(function (el) {
+      if (!originalPlaceholder.has(el)) {
+        originalPlaceholder.set(el, el.getAttribute("placeholder"));
+        placeholderElements.push(el);
+      }
+    });
+  }
+
+  function restorePlaceholders() {
+    placeholderElements.forEach(function (el) {
+      var original = originalPlaceholder.get(el);
+      if (original !== undefined) el.setAttribute("placeholder", original);
+    });
+  }
+
   // Bumped on every new selection so a slow, still-in-flight chunk from
   // a superseded request can't clobber the DOM after the user has
   // already switched to a different language.
@@ -112,26 +159,46 @@
   var activeTargetLocale = null;
   var sourceLocaleGlobal = null;
 
-  // Translates a specific list of already-captured nodes and applies
-  // results as each chunk lands. Shared by the full-page pass and the
-  // mutation observer's incremental passes.
-  function translateNodeList(nodes, targetLocale, requestId) {
-    var perNodeText = nodes.map(function (node) {
-      return originalText.get(node);
-    });
+  // A "unit" is anything with a translatable string and a way to apply
+  // a translated result back — a text node, or an input's placeholder
+  // attribute. This lets one pipeline (chunking, caching, applying)
+  // serve both.
+  function textNodeUnit(node) {
+    return {
+      text: originalText.get(node),
+      apply: function (key, translated) {
+        var text = originalText.get(node);
+        // Preserve surrounding whitespace from the original text node.
+        node.nodeValue = text.replace(key, translated);
+      },
+    };
+  }
 
-    // Map each unique string to every node sharing it, so a single
+  function placeholderUnit(el) {
+    return {
+      text: originalPlaceholder.get(el),
+      apply: function (key, translated) {
+        el.setAttribute("placeholder", translated);
+      },
+    };
+  }
+
+  // Translates a specific list of units and applies results as each
+  // chunk lands. Shared by the full-page pass and the mutation
+  // observer's incremental passes, for both text nodes and placeholders.
+  function translateUnits(units, targetLocale, requestId) {
+    // Map each unique string to every unit sharing it, so a single
     // translated result can be applied everywhere it appears.
     var uniqueTexts = [];
-    var nodesByText = {};
-    perNodeText.forEach(function (text, i) {
-      var key = text.trim();
+    var unitsByText = {};
+    units.forEach(function (unit) {
+      var key = unit.text.trim();
       if (!key) return;
-      if (!(key in nodesByText)) {
-        nodesByText[key] = [];
+      if (!(key in unitsByText)) {
+        unitsByText[key] = [];
         uniqueTexts.push(key);
       }
-      nodesByText[key].push(nodes[i]);
+      unitsByText[key].push(unit);
     });
 
     if (uniqueTexts.length === 0) return Promise.resolve();
@@ -154,10 +221,8 @@
           chunkTexts.forEach(function (key, idx) {
             var translated = data.translations[idx];
             if (!translated) return;
-            nodesByText[key].forEach(function (node) {
-              var text = originalText.get(node);
-              // Preserve surrounding whitespace from the original text node.
-              node.nodeValue = text.replace(key, translated);
+            unitsByText[key].forEach(function (unit) {
+              unit.apply(key, translated);
             });
           });
         });
@@ -165,18 +230,31 @@
     );
   }
 
+  function translateNodeList(nodes, targetLocale, requestId) {
+    return translateUnits(nodes.map(textNodeUnit), targetLocale, requestId);
+  }
+
+  function translatePlaceholderList(elements, targetLocale, requestId) {
+    return translateUnits(elements.map(placeholderUnit), targetLocale, requestId);
+  }
+
   function applyTranslations(sourceLocale, targetLocale) {
     var requestId = ++currentRequestId;
     sourceLocaleGlobal = sourceLocale;
     activeTargetLocale = targetLocale;
     captureOriginals(collectTextNodes(document.body));
+    capturePlaceholders(collectPlaceholderElements(document.body));
 
     if (targetLocale === sourceLocale) {
       restoreOriginals();
+      restorePlaceholders();
       return Promise.resolve();
     }
 
-    return translateNodeList(textNodes, targetLocale, requestId);
+    return Promise.all([
+      translateNodeList(textNodes, targetLocale, requestId),
+      translatePlaceholderList(placeholderElements, targetLocale, requestId),
+    ]);
   }
 
   // --- Pick up content added to the page after the initial pass ------
@@ -189,12 +267,14 @@
   // payment fields, for security), it's simply not visible to any
   // page script, this one included.
   var pendingMutationNodes = [];
+  var pendingPlaceholderElements = [];
   var mutationDebounceTimer = null;
 
   function flushPendingMutations() {
     mutationDebounceTimer = null;
     if (!activeTargetLocale || activeTargetLocale === sourceLocaleGlobal) {
       pendingMutationNodes = [];
+      pendingPlaceholderElements = [];
       return;
     }
     var newNodes = [];
@@ -202,9 +282,21 @@
       if (!originalText.has(node)) newNodes.push(node);
     });
     pendingMutationNodes = [];
-    if (newNodes.length === 0) return;
-    captureOriginals(newNodes);
-    translateNodeList(newNodes, activeTargetLocale, currentRequestId);
+
+    var newPlaceholders = [];
+    pendingPlaceholderElements.forEach(function (el) {
+      if (!originalPlaceholder.has(el)) newPlaceholders.push(el);
+    });
+    pendingPlaceholderElements = [];
+
+    if (newNodes.length > 0) {
+      captureOriginals(newNodes);
+      translateNodeList(newNodes, activeTargetLocale, currentRequestId);
+    }
+    if (newPlaceholders.length > 0) {
+      capturePlaceholders(newPlaceholders);
+      translatePlaceholderList(newPlaceholders, activeTargetLocale, currentRequestId);
+    }
   }
 
   function observePageChanges() {
@@ -215,10 +307,11 @@
             if (isTranslatable(node)) pendingMutationNodes.push(node);
           } else if (node.nodeType === Node.ELEMENT_NODE) {
             pendingMutationNodes = pendingMutationNodes.concat(collectTextNodes(node));
+            pendingPlaceholderElements = pendingPlaceholderElements.concat(collectPlaceholderElements(node));
           }
         });
       });
-      if (pendingMutationNodes.length === 0) return;
+      if (pendingMutationNodes.length === 0 && pendingPlaceholderElements.length === 0) return;
       if (mutationDebounceTimer) clearTimeout(mutationDebounceTimer);
       mutationDebounceTimer = setTimeout(flushPendingMutations, 400);
     });
@@ -294,6 +387,7 @@
           sourceLocaleGlobal = config.sourceLocale;
           activeTargetLocale = config.sourceLocale;
           captureOriginals(collectTextNodes(document.body));
+          capturePlaceholders(collectPlaceholderElements(document.body));
         }
         if (!saved) setCookie(COOKIE_NAME, initialLocale);
 
