@@ -2,9 +2,14 @@ import crypto from "node:crypto";
 import { easystoreConfig, EASYSTORE_AUTHORIZE_HOST, adminApiUrl } from "./config";
 
 /**
- * Step 1: send the merchant to EasyStore to approve the app.
- * Endpoint/params confirmed against EasyStore's authentication docs:
- * https://admin.easystore.co/oauth/authorize?app_id=...&scope=...&redirect_uri=...
+ * Step 1 entry point: EasyStore itself sends the merchant's browser to
+ * this app's App URL (registered in the Partner Dashboard — our root
+ * "/", see src/app/page.tsx + src/app/api/auth/launch/route.ts) with
+ * `shop`, `host_url`, `timestamp`, `hmac` query params whenever a user
+ * logged into the App Store opens/installs the app. After verifying
+ * that request, if the shop isn't installed yet, redirect here to show
+ * EasyStore's authorize prompt.
+ * Confirmed against EasyStore's authentication docs.
  */
 export function buildAuthorizeUrl(): string {
   const url = new URL("/oauth/authorize", EASYSTORE_AUTHORIZE_HOST);
@@ -15,27 +20,34 @@ export function buildAuthorizeUrl(): string {
 }
 
 /**
- * Step 2: EasyStore redirects back to redirect_uri with `code`,
- * `host_url` (the shop domain), `hmac`, and `timestamp`. Verify the
- * hmac before trusting any of it — it's signed with the app's client
- * secret over the other query params.
+ * Step 2: after the merchant approves, EasyStore redirects to
+ * redirect_uri with `code`, `host_url`, `shop`, `hmac`, and `timestamp`.
+ * The shop's domain is carried in `shop` (not `host_url`, which is a
+ * generic EasyStore admin URL, e.g. https://admin.easystore.co).
  *
- * NOTE: EasyStore's exact param-serialization rule for this HMAC
- * wasn't reachable from their docs during development (403'd on
- * direct fetch). This follows the conventional OAuth-callback HMAC
- * scheme (sort remaining params, join as key=value with '&', HMAC-SHA256
- * hex with the client secret) — confirm against
- * https://developers.easystore.co/docs/api/authentication before
- * relying on it in production.
+ * Verify the hmac before trusting any of it — it's signed with the
+ * app's client secret over the other query params. Escaping rules
+ * confirmed against EasyStore's authentication docs: within both keys
+ * and values, "%" -> "%25" and "&" -> "%26"; additionally, within keys
+ * only, "=" -> "%3D". Remaining params are then sorted lexicographically
+ * and joined as key=value pairs with "&".
  */
-export function verifyCallbackHmac(params: URLSearchParams): boolean {
+function escapeHmacValue(value: string): string {
+  return value.replace(/%/g, "%25").replace(/&/g, "%26");
+}
+
+function escapeHmacKey(key: string): string {
+  return escapeHmacValue(key).replace(/=/g, "%3D");
+}
+
+export function verifyEasyStoreHmac(params: URLSearchParams): boolean {
   const hmac = params.get("hmac");
   if (!hmac) return false;
 
   const pairs: string[] = [];
   for (const [key, value] of params.entries()) {
     if (key === "hmac" || key === "signature") continue;
-    pairs.push(`${key}=${value}`);
+    pairs.push(`${escapeHmacKey(key)}=${escapeHmacValue(value)}`);
   }
   pairs.sort();
   const message = pairs.join("&");
@@ -48,6 +60,11 @@ export function verifyCallbackHmac(params: URLSearchParams): boolean {
   const a = Buffer.from(digest, "utf8");
   const b = Buffer.from(hmac, "utf8");
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** Confirmed security check from EasyStore's docs: shop must end with "easy.co". */
+export function isValidEasyStoreShopDomain(shop: string): boolean {
+  return shop.endsWith(".easy.co");
 }
 
 interface AccessTokenResponse {

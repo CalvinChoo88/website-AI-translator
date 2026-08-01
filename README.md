@@ -39,11 +39,21 @@ geo-aware site, and can override it in the dropdown either way.
 
 ## How it fits together
 
-1. **Install (OAuth)** — `src/app/api/auth/install` and `.../callback`
-   implement EasyStore's OAuth flow: authorize at
-   `https://admin.easystore.co/oauth/authorize`, exchange the code at
-   `POST https://{shop}/api/3.0/oauth/access_token.json`, store the
-   resulting access token per shop (`Shop` table).
+1. **Install (OAuth)** — EasyStore's real entry point is the App URL
+   itself: whenever a user logged into the App Store opens or installs
+   this app, EasyStore issues a GET request to the App URL (our root
+   `/`) carrying `shop`, `host_url`, `timestamp`, and `hmac` query
+   params. `src/app/page.tsx` forwards that to
+   `src/app/api/auth/launch/route.ts`, which verifies the HMAC, and
+   either signs an already-installed shop straight into `/admin` or
+   redirects to `https://admin.easystore.co/oauth/authorize` to start
+   the grant. After approval, EasyStore redirects to
+   `src/app/api/auth/callback/route.ts` with `code`, `shop`, `host_url`,
+   `hmac`, and `timestamp`; the code is exchanged at
+   `POST https://{shop}/api/3.0/oauth/access_token.json` and the
+   resulting access token is stored per shop (`Shop` table, keyed by
+   the `shop` domain — not `host_url`, which is just a generic
+   EasyStore admin URL).
 2. **Admin settings** (`/admin`) — merchant picks which languages to
    offer and whether to auto-suggest by location; settings are saved via
    `/api/admin/settings` (protected by a signed session cookie issued at
@@ -96,7 +106,13 @@ npm run dev
 ### Partner Dashboard setup
 
 1. Partner Dashboard > Apps > Create app.
-2. App URL: `{APP_URL}`; Redirect URL: `{APP_URL}/api/auth/callback`.
+2. **App URL**: `{APP_URL}` (the bare root, no path — this is what
+   receives the signed `shop`/`hmac` request on every app open).
+   **Redirect URL**: `{APP_URL}/api/auth/callback` (this one *does*
+   need the path — it must exactly match what the app sends as
+   `redirect_uri`, or EasyStore falls back to sending the OAuth grant
+   response to the bare App URL instead, which this app doesn't parse
+   as a callback).
 3. Register a webhook for topic `app/uninstalled` pointing at
    `{APP_URL}/api/webhooks/app-uninstalled`.
 4. Install the app from a development store to test the OAuth flow.
@@ -127,22 +143,38 @@ npm run dev
 
 ## Things verified vs. assumed
 
-Verified against EasyStore's docs during development (some pages 403'd
-direct fetches, so this came from cached/search-indexed excerpts —
-sanity-check against the live docs before shipping):
+Confirmed directly against EasyStore's actual developer docs (their
+docs site 403'd on automated fetches during development, so this app
+initially shipped with guessed mechanics — corrected once a human
+pulled the real docs):
 
+- The **App URL is the true OAuth entry point** — EasyStore GETs it
+  directly with `shop`, `host_url`, `timestamp`, `hmac` whenever a
+  logged-in App Store user opens/installs the app (handled by
+  `src/app/api/auth/launch/route.ts`, forwarded there from `src/app/page.tsx`).
+  There is no separate "/install" endpoint on EasyStore's side.
+- The OAuth callback's shop domain comes from the **`shop`** parameter,
+  not `host_url` (which is a generic EasyStore admin URL, e.g.
+  `https://admin.easystore.co`, not shop-specific).
+- The HMAC message-building algorithm's exact escaping rules: within
+  both keys and values, `%`→`%25` and `&`→`%26`; additionally, within
+  keys only, `=`→`%3D`. Remaining params are sorted lexicographically
+  and joined as `key=value` pairs with `&` before HMAC-SHA256 signing
+  (`src/lib/easystore/oauth.ts`, `verifyEasyStoreHmac`). Verified
+  against EasyStore's own worked example from their docs.
+- Security check: shop domains must end with `.easy.co`
+  (`isValidEasyStoreShopDomain`).
 - OAuth authorize endpoint, params, and token-exchange endpoint/response shape.
 - `EasyStore-Access-Token` header for authenticated Admin API calls.
 - `EasyStore-Hmac-SHA256` webhook signature scheme (hex HMAC-SHA256 over the raw body).
 
-Not confirmed (flagged in code comments where used — check before
-production):
+Still not confirmed (flagged in code comments where used):
 
 - Exact scope name strings.
-- Exact query-param serialization EasyStore uses for the OAuth callback
-  HMAC (implemented using the conventional sorted-params scheme).
 - The field name carrying shop domain in the `app/uninstalled` webhook
-  payload (implemented to check `domain`, `shop`, then `store.domain`).
+  payload (implemented to check `domain`, `shop`, then `store.domain` —
+  given the OAuth flow's field is called `shop`, that's the most likely
+  one, but the webhook payload shape itself wasn't in what we confirmed).
 
 ## Known limitations / next steps
 

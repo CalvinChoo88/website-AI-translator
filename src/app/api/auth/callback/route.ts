@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCallbackHmac, exchangeCodeForToken } from "@/lib/easystore/oauth";
+import { verifyEasyStoreHmac, isValidEasyStoreShopDomain, exchangeCodeForToken } from "@/lib/easystore/oauth";
 import { EasyStoreAdminClient } from "@/lib/easystore/client";
 import { easystoreConfig } from "@/lib/easystore/config";
 import { db } from "@/lib/db";
@@ -8,14 +8,14 @@ import { createSessionToken, SESSION_COOKIE } from "@/lib/session";
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
 
-  if (!verifyCallbackHmac(params)) {
+  if (!verifyEasyStoreHmac(params)) {
     return NextResponse.json({ error: "Invalid HMAC — request rejected" }, { status: 401 });
   }
 
   const code = params.get("code");
-  const shopDomain = params.get("host_url");
-  if (!code || !shopDomain) {
-    return NextResponse.json({ error: "Missing code or host_url" }, { status: 400 });
+  const shopDomain = params.get("shop");
+  if (!code || !shopDomain || !isValidEasyStoreShopDomain(shopDomain)) {
+    return NextResponse.json({ error: "Missing code or invalid shop" }, { status: 400 });
   }
 
   const { access_token, scope } = await exchangeCodeForToken(shopDomain, code);
