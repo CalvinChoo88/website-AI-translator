@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { LANGUAGES } from "@/lib/languages";
 
@@ -82,7 +83,12 @@ export function AdminSettingsForm({
 
   return (
     <main style={{ maxWidth: 720, margin: "40px auto", padding: "0 24px", lineHeight: 1.5 }}>
-      <h1>Translation settings</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1>Translation settings</h1>
+        <Link href="/admin/faq" style={{ fontSize: 14 }}>
+          FAQ
+        </Link>
+      </div>
       <p style={{ color: "#555" }}>
         Store: <strong>{domain}</strong> &middot; Source language:{" "}
         <strong>{sourceLocale}</strong>

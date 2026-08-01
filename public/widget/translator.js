@@ -13,6 +13,13 @@
  *    on every visit.
  *  - Translates visible text on the page by batching text nodes to the
  *    app's /api/translate endpoint (server-side cached per shop+locale).
+ *  - Watches for content added to the page after load (e.g. a checkout
+ *    step that renders its form client-side a moment after page load)
+ *    and translates that too, rather than only translating a one-time
+ *    snapshot of the page. This does NOT reach into shadow DOM or
+ *    cross-origin iframes — content deliberately isolated there (e.g.
+ *    a platform's own payment/PII form, for security reasons) stays
+ *    untouched, by design.
  */
 (function () {
   "use strict";
@@ -52,17 +59,21 @@
 
   var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, INPUT: 1 };
 
+  function isTranslatable(node) {
+    var parent = node.parentElement;
+    if (!parent) return false;
+    if (SKIP_TAGS[parent.tagName]) return false;
+    if (parent.closest("[data-no-translate]")) return false;
+    if (parent.closest("#estranslate-widget")) return false;
+    if (!node.nodeValue || !node.nodeValue.trim()) return false;
+    return true;
+  }
+
   function collectTextNodes(root) {
     var nodes = [];
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: function (node) {
-        var parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TAGS[parent.tagName]) return NodeFilter.FILTER_REJECT;
-        if (parent.closest("[data-no-translate]")) return NodeFilter.FILTER_REJECT;
-        if (parent.closest("#estranslate-widget")) return NodeFilter.FILTER_REJECT;
-        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
+        return isTranslatable(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       },
     });
     var current;
@@ -75,10 +86,12 @@
   var originalText = new WeakMap();
   var textNodes = [];
 
-  function captureOriginals() {
-    textNodes = collectTextNodes(document.body);
-    textNodes.forEach(function (node) {
-      if (!originalText.has(node)) originalText.set(node, node.nodeValue);
+  function captureOriginals(nodes) {
+    nodes.forEach(function (node) {
+      if (!originalText.has(node)) {
+        originalText.set(node, node.nodeValue);
+        textNodes.push(node);
+      }
     });
   }
 
@@ -93,32 +106,32 @@
   // a superseded request can't clobber the DOM after the user has
   // already switched to a different language.
   var currentRequestId = 0;
+  // The currently-selected target locale, tracked so the mutation
+  // observer below knows whether (and into what) to translate newly
+  // added content. Set by applyTranslations.
+  var activeTargetLocale = null;
+  var sourceLocaleGlobal = null;
 
-  function applyTranslations(sourceLocale, targetLocale) {
-    var requestId = ++currentRequestId;
-    captureOriginals();
-    if (targetLocale === sourceLocale) {
-      restoreOriginals();
-      return Promise.resolve();
-    }
-
-    var perNodeText = textNodes.map(function (node) {
+  // Translates a specific list of already-captured nodes and applies
+  // results as each chunk lands. Shared by the full-page pass and the
+  // mutation observer's incremental passes.
+  function translateNodeList(nodes, targetLocale, requestId) {
+    var perNodeText = nodes.map(function (node) {
       return originalText.get(node);
     });
 
-    // Map each unique string to every node index sharing it, so a
-    // single translated result can be applied everywhere it appears
-    // (e.g. repeated nav/footer text) as soon as its chunk lands.
+    // Map each unique string to every node sharing it, so a single
+    // translated result can be applied everywhere it appears.
     var uniqueTexts = [];
-    var nodeIndicesByText = {};
+    var nodesByText = {};
     perNodeText.forEach(function (text, i) {
       var key = text.trim();
       if (!key) return;
-      if (!(key in nodeIndicesByText)) {
-        nodeIndicesByText[key] = [];
+      if (!(key in nodesByText)) {
+        nodesByText[key] = [];
         uniqueTexts.push(key);
       }
-      nodeIndicesByText[key].push(i);
+      nodesByText[key].push(nodes[i]);
     });
 
     if (uniqueTexts.length === 0) return Promise.resolve();
@@ -129,8 +142,7 @@
     for (var i = 0; i < uniqueTexts.length; i += CHUNK) chunks.push(uniqueTexts.slice(i, i + CHUNK));
 
     // Fire every chunk in parallel (rather than one-at-a-time) and
-    // apply each one to the DOM as soon as it lands, so the page
-    // starts looking translated well before the slowest chunk finishes.
+    // apply each one to the DOM as soon as it lands.
     return Promise.all(
       chunks.map(function (chunkTexts) {
         return fetchJson(API_BASE + "/api/translate", {
@@ -142,15 +154,75 @@
           chunkTexts.forEach(function (key, idx) {
             var translated = data.translations[idx];
             if (!translated) return;
-            nodeIndicesByText[key].forEach(function (nodeIndex) {
-              var text = perNodeText[nodeIndex];
+            nodesByText[key].forEach(function (node) {
+              var text = originalText.get(node);
               // Preserve surrounding whitespace from the original text node.
-              textNodes[nodeIndex].nodeValue = text.replace(key, translated);
+              node.nodeValue = text.replace(key, translated);
             });
           });
         });
       }),
     );
+  }
+
+  function applyTranslations(sourceLocale, targetLocale) {
+    var requestId = ++currentRequestId;
+    sourceLocaleGlobal = sourceLocale;
+    activeTargetLocale = targetLocale;
+    captureOriginals(collectTextNodes(document.body));
+
+    if (targetLocale === sourceLocale) {
+      restoreOriginals();
+      return Promise.resolve();
+    }
+
+    return translateNodeList(textNodes, targetLocale, requestId);
+  }
+
+  // --- Pick up content added to the page after the initial pass ------
+  //
+  // Some pages (checkout in particular) render parts of the form a
+  // moment after the page loads. Without this, only whatever existed
+  // at the moment a language was selected gets translated. This does
+  // not, and cannot, reach into shadow DOM or cross-origin iframes —
+  // if a platform deliberately isolates a form there (e.g. around
+  // payment fields, for security), it's simply not visible to any
+  // page script, this one included.
+  var pendingMutationNodes = [];
+  var mutationDebounceTimer = null;
+
+  function flushPendingMutations() {
+    mutationDebounceTimer = null;
+    if (!activeTargetLocale || activeTargetLocale === sourceLocaleGlobal) {
+      pendingMutationNodes = [];
+      return;
+    }
+    var newNodes = [];
+    pendingMutationNodes.forEach(function (node) {
+      if (!originalText.has(node)) newNodes.push(node);
+    });
+    pendingMutationNodes = [];
+    if (newNodes.length === 0) return;
+    captureOriginals(newNodes);
+    translateNodeList(newNodes, activeTargetLocale, currentRequestId);
+  }
+
+  function observePageChanges() {
+    var observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            if (isTranslatable(node)) pendingMutationNodes.push(node);
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            pendingMutationNodes = pendingMutationNodes.concat(collectTextNodes(node));
+          }
+        });
+      });
+      if (pendingMutationNodes.length === 0) return;
+      if (mutationDebounceTimer) clearTimeout(mutationDebounceTimer);
+      mutationDebounceTimer = setTimeout(flushPendingMutations, 400);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   // --- Widget UI -------------------------------------------------------
@@ -191,6 +263,7 @@
         if (!config.enabledLocales || config.enabledLocales.length === 0) return;
 
         var select = buildDropdown(config);
+        observePageChanges();
 
         function withLoadingState(promise) {
           select.disabled = true;
@@ -218,7 +291,9 @@
         if (initialLocale !== config.sourceLocale) {
           withLoadingState(applyTranslations(config.sourceLocale, initialLocale));
         } else {
-          captureOriginals();
+          sourceLocaleGlobal = config.sourceLocale;
+          activeTargetLocale = config.sourceLocale;
+          captureOriginals(collectTextNodes(document.body));
         }
         if (!saved) setCookie(COOKIE_NAME, initialLocale);
 
