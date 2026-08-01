@@ -1,4 +1,5 @@
 import type { TranslationProvider } from "./provider";
+import { mapWithConcurrency } from "./concurrency";
 
 // DeepL API v2 (REST, "DeepL-Auth-Key" header auth). Free tier is
 // 500,000 characters/month. Narrower language coverage than
@@ -11,6 +12,11 @@ const PRO_BASE_URL = "https://api.deepl.com";
 // Confirmed limits: max 50 texts and max 128 KiB per /v2/translate request.
 const MAX_ITEMS_PER_REQUEST = 50;
 const MAX_CHARS_PER_REQUEST = 40000;
+
+// How many chunk requests to run in parallel. Kept conservative for
+// DeepL specifically — their free tier gets flaky above ~5-10
+// simultaneous requests, per their own docs.
+const CHUNK_CONCURRENCY = 3;
 
 /**
  * Our language catalog (src/lib/languages.ts) covers ~130 languages;
@@ -107,8 +113,8 @@ export class DeepLTranslateProvider implements TranslationProvider {
     }
     const source = DEEPL_LOCALE_MAP[sourceLocale];
 
-    const results: string[] = [];
-    for (const batch of chunkByCountAndChars(texts)) {
+    const chunks = chunkByCountAndChars(texts);
+    const chunkResults = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, async (batch) => {
       const res = await fetch(`${this.baseUrl}/v2/translate`, {
         method: "POST",
         headers: {
@@ -128,8 +134,8 @@ export class DeepLTranslateProvider implements TranslationProvider {
       }
 
       const data = (await res.json()) as DeepLResponse;
-      results.push(...data.translations.map((t) => t.text));
-    }
-    return results;
+      return data.translations.map((t) => t.text);
+    });
+    return chunkResults.flat();
   }
 }

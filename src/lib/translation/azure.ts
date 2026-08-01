@@ -1,4 +1,5 @@
 import type { TranslationProvider } from "./provider";
+import { mapWithConcurrency } from "./concurrency";
 
 // Azure AI Translator v3.0 (REST, subscription-key auth). Free tier
 // (F0) is 2M characters/month, indefinitely — not a trial — with
@@ -12,6 +13,9 @@ const API_VERSION = "3.0";
 // both dimensions, with headroom under the character cap.
 const MAX_ITEMS_PER_REQUEST = 100;
 const MAX_CHARS_PER_REQUEST = 40000;
+
+// How many chunk requests to run in parallel.
+const CHUNK_CONCURRENCY = 5;
 
 // Our language catalog (src/lib/languages.ts) mostly uses Google
 // Translate-style codes; Azure uses BCP-47 codes that diverge for a
@@ -69,8 +73,8 @@ export class AzureTranslateProvider implements TranslationProvider {
     const to = toAzureLocale(targetLocale);
     const from = toAzureLocale(sourceLocale);
 
-    const results: string[] = [];
-    for (const batch of chunkByCountAndChars(texts)) {
+    const chunks = chunkByCountAndChars(texts);
+    const chunkResults = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, async (batch) => {
       const url = `${ENDPOINT}?api-version=${API_VERSION}&from=${from}&to=${to}`;
       const headers: Record<string, string> = {
         "Ocp-Apim-Subscription-Key": this.subscriptionKey,
@@ -90,8 +94,8 @@ export class AzureTranslateProvider implements TranslationProvider {
       }
 
       const data = (await res.json()) as AzureTranslateResponseItem[];
-      results.push(...data.map((item) => item.translations[0]?.text ?? ""));
-    }
-    return results;
+      return data.map((item) => item.translations[0]?.text ?? "");
+    });
+    return chunkResults.flat();
   }
 }

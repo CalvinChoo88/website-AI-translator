@@ -1,4 +1,5 @@
 import type { TranslationProvider } from "./provider";
+import { mapWithConcurrency } from "./concurrency";
 
 // Google Cloud Translation v2 (REST, API-key auth) — simplest integration
 // path and broadest language coverage (~130 languages), matching the
@@ -8,6 +9,9 @@ const ENDPOINT = "https://translation.googleapis.com/language/translate/v2";
 
 // Keep well under Google's per-request q[] / payload limits.
 const BATCH_SIZE = 100;
+
+// How many chunk requests to run in parallel.
+const CHUNK_CONCURRENCY = 5;
 
 interface GoogleTranslateResponse {
   data: { translations: { translatedText: string }[] };
@@ -29,8 +33,8 @@ export class GoogleTranslateProvider implements TranslationProvider {
   ): Promise<string[]> {
     if (texts.length === 0) return [];
 
-    const results: string[] = [];
-    for (const batch of chunk(texts, BATCH_SIZE)) {
+    const chunks = chunk(texts, BATCH_SIZE);
+    const chunkResults = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, async (batch) => {
       const params = new URLSearchParams({
         key: this.apiKey,
         target: targetLocale,
@@ -46,8 +50,8 @@ export class GoogleTranslateProvider implements TranslationProvider {
       }
 
       const data = (await res.json()) as GoogleTranslateResponse;
-      results.push(...data.data.translations.map((t) => t.translatedText));
-    }
-    return results;
+      return data.data.translations.map((t) => t.translatedText);
+    });
+    return chunkResults.flat();
   }
 }

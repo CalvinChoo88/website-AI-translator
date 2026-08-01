@@ -89,25 +89,36 @@
     });
   }
 
+  // Bumped on every new selection so a slow, still-in-flight chunk from
+  // a superseded request can't clobber the DOM after the user has
+  // already switched to a different language.
+  var currentRequestId = 0;
+
   function applyTranslations(sourceLocale, targetLocale) {
+    var requestId = ++currentRequestId;
     captureOriginals();
     if (targetLocale === sourceLocale) {
       restoreOriginals();
       return Promise.resolve();
     }
 
-    var uniqueTexts = [];
-    var indexByText = {};
     var perNodeText = textNodes.map(function (node) {
       return originalText.get(node);
     });
 
-    perNodeText.forEach(function (text) {
+    // Map each unique string to every node index sharing it, so a
+    // single translated result can be applied everywhere it appears
+    // (e.g. repeated nav/footer text) as soon as its chunk lands.
+    var uniqueTexts = [];
+    var nodeIndicesByText = {};
+    perNodeText.forEach(function (text, i) {
       var key = text.trim();
-      if (key && !(key in indexByText)) {
-        indexByText[key] = uniqueTexts.length;
+      if (!key) return;
+      if (!(key in nodeIndicesByText)) {
+        nodeIndicesByText[key] = [];
         uniqueTexts.push(key);
       }
+      nodeIndicesByText[key].push(i);
     });
 
     if (uniqueTexts.length === 0) return Promise.resolve();
@@ -117,31 +128,29 @@
     var chunks = [];
     for (var i = 0; i < uniqueTexts.length; i += CHUNK) chunks.push(uniqueTexts.slice(i, i + CHUNK));
 
-    var translatedByText = {};
-    return chunks
-      .reduce(function (chain, chunkTexts) {
-        return chain.then(function () {
-          return fetchJson(API_BASE + "/api/translate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ shop: SHOP, locale: targetLocale, texts: chunkTexts }),
-          }).then(function (data) {
-            chunkTexts.forEach(function (text, idx) {
-              translatedByText[text] = data.translations[idx];
+    // Fire every chunk in parallel (rather than one-at-a-time) and
+    // apply each one to the DOM as soon as it lands, so the page
+    // starts looking translated well before the slowest chunk finishes.
+    return Promise.all(
+      chunks.map(function (chunkTexts) {
+        return fetchJson(API_BASE + "/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shop: SHOP, locale: targetLocale, texts: chunkTexts }),
+        }).then(function (data) {
+          if (requestId !== currentRequestId) return; // superseded by a newer selection
+          chunkTexts.forEach(function (key, idx) {
+            var translated = data.translations[idx];
+            if (!translated) return;
+            nodeIndicesByText[key].forEach(function (nodeIndex) {
+              var text = perNodeText[nodeIndex];
+              // Preserve surrounding whitespace from the original text node.
+              textNodes[nodeIndex].nodeValue = text.replace(key, translated);
             });
           });
         });
-      }, Promise.resolve())
-      .then(function () {
-        textNodes.forEach(function (node, i) {
-          var text = perNodeText[i];
-          var key = text.trim();
-          var translated = translatedByText[key];
-          if (!translated) return;
-          // Preserve surrounding whitespace from the original text node.
-          node.nodeValue = text.replace(key, translated);
-        });
-      });
+      }),
+    );
   }
 
   // --- Widget UI -------------------------------------------------------
@@ -183,6 +192,18 @@
 
         var select = buildDropdown(config);
 
+        function withLoadingState(promise) {
+          select.disabled = true;
+          select.style.opacity = "0.6";
+          select.style.cursor = "wait";
+          function reset() {
+            select.disabled = false;
+            select.style.opacity = "1";
+            select.style.cursor = "pointer";
+          }
+          promise.then(reset, reset);
+        }
+
         var saved = getCookie(COOKIE_NAME);
         var initialLocale =
           saved && (saved === config.sourceLocale || config.enabledLocales.some(function (l) {
@@ -195,7 +216,7 @@
 
         select.value = initialLocale;
         if (initialLocale !== config.sourceLocale) {
-          applyTranslations(config.sourceLocale, initialLocale);
+          withLoadingState(applyTranslations(config.sourceLocale, initialLocale));
         } else {
           captureOriginals();
         }
@@ -204,7 +225,7 @@
         select.addEventListener("change", function () {
           var target = select.value;
           setCookie(COOKIE_NAME, target);
-          applyTranslations(config.sourceLocale, target);
+          withLoadingState(applyTranslations(config.sourceLocale, target));
         });
       })
       .catch(function (err) {
