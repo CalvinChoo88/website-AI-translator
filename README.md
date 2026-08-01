@@ -93,7 +93,7 @@ npm run dev
 |---|---|
 | `DATABASE_URL` | Postgres connection string. On Vercel, whichever storage integration you attach injects its own env var name (e.g. `POSTGRES_PRISMA_URL`) — copy that value into a `DATABASE_URL` entry so Prisma picks it up |
 | `EASYSTORE_CLIENT_ID` / `EASYSTORE_CLIENT_SECRET` | From Partner Dashboard > Apps > your app's overview page |
-| `EASYSTORE_SCOPES` | Comma-separated scopes — **verify exact scope names** against https://developers.easystore.co/docs/api/getting-started/scopes before launch; that page 403'd during development so the `.env.example` default is a best guess (`read_products,read_content,read_store`) |
+| `EASYSTORE_SCOPES` | Comma-separated, from EasyStore's confirmed scope list (see `.env.example`) — no `read_store`, that scope doesn't exist; default is `read_products,read_content` |
 | `APP_URL` | Public base URL of this deployment; must match the redirect URL registered in the Partner Dashboard |
 | `SESSION_SECRET` | Random secret for the admin session cookie (`openssl rand -hex 32`) |
 | `TRANSLATION_PROVIDER` | `deepl` (default), `azure`, or `google` |
@@ -167,10 +167,13 @@ pulled the real docs):
 - OAuth authorize endpoint, params, and token-exchange endpoint/response shape.
 - `EasyStore-Access-Token` header for authenticated Admin API calls.
 - `EasyStore-Hmac-SHA256` webhook signature scheme (hex HMAC-SHA256 over the raw body).
+- Full valid scope list (see `.env.example`) — notably there is **no
+  `read_store` scope**; requesting it fails OAuth authorization with
+  "Invalid scopes". Basic store info (`store.json`) needs no scope at
+  all, which is presumably why no such scope exists.
 
 Still not confirmed (flagged in code comments where used):
 
-- Exact scope name strings.
 - The field name carrying shop domain in the `app/uninstalled` webhook
   payload (implemented to check `domain`, `shop`, then `store.domain` —
   given the OAuth flow's field is called `shop`, that's the most likely
