@@ -62,6 +62,15 @@ export async function POST(req: NextRequest) {
     return corsJson({ error: "Locale not enabled for this shop" }, { status: 400 });
   }
 
-  const translations = await translateBatchCached(shop.id, shop.sourceLocale, locale, texts);
-  return corsJson({ translations });
+  try {
+    const translations = await translateBatchCached(shop.id, shop.sourceLocale, locale, texts);
+    return corsJson({ translations });
+  } catch (err) {
+    // Without this catch, an uncaught throw here falls through to
+    // Next's default error response, which carries none of corsJson's
+    // CORS headers — the browser then reports it as a CORS failure,
+    // masking whatever actually went wrong server-side.
+    console.error("[api/translate]", err);
+    return corsJson({ error: "Translation failed" }, { status: 500 });
+  }
 }

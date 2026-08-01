@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
 import { getTranslationProvider } from "./index";
+import { mapWithConcurrency } from "./concurrency";
 
 function hashText(text: string): string {
   return crypto.createHash("sha256").update(text.trim()).digest("hex");
@@ -46,18 +47,26 @@ export async function translateBatchCached(
     const translated = await provider.translateBatch(missTexts, targetLocale, sourceLocale);
 
     // upsert (not createMany + skipDuplicates, which SQLite doesn't
-    // support) so this stays portable across DB providers and is safe
-    // against a race with a concurrent request caching the same string.
-    await Promise.all(
-      missTexts.map((text, i) => {
-        const sourceHash = hashes[missIndices[i]!]!;
-        return db.translation.upsert({
+    // support) so this stays portable across DB providers. Bounded
+    // concurrency, not Promise.all, since a page like checkout can
+    // surface dozens of never-seen strings in one request — unbounded
+    // parallel writes exhaust the DB's pooled connection limit. A
+    // P2002 (unique constraint) here just means another concurrent
+    // request already cached the same string first — that's the
+    // desired outcome, not a failure, so it's swallowed rather than
+    // thrown (an uncaught throw here would 500 the whole request).
+    await mapWithConcurrency(missTexts, 3, async (text, i) => {
+      const sourceHash = hashes[missIndices[i]!]!;
+      try {
+        await db.translation.upsert({
           where: { shopId_locale_sourceHash: { shopId, locale: targetLocale, sourceHash } },
           create: { shopId, locale: targetLocale, sourceHash, sourceText: text, translatedText: translated[i]! },
           update: {},
         });
-      }),
-    );
+      } catch (err) {
+        if ((err as { code?: string }).code !== "P2002") throw err;
+      }
+    });
 
     missTexts.forEach((text, i) => {
       cacheByHash.set(hashes[missIndices[i]!]!, translated[i]!);
