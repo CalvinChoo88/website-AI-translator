@@ -86,6 +86,26 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    q: 'What does "auto-translate the rest of my storefront" do?',
+    a: (
+      <>
+        By default, each page is translated the first time any shopper
+        actually views it in a given language — so the very first shopper to
+        reach a page pays a small wait, and everyone after (on any page,
+        any device) gets the cached result instantly. Turning this setting
+        on changes that: the moment any shopper picks a new language, the
+        app starts crawling the rest of your storefront in the background
+        and translating it into that language too, so later shoppers are
+        far less likely to land on a page that hasn&rsquo;t been translated
+        yet. It&rsquo;s off by default because it spends translation-provider
+        quota proactively — including on pages nobody may ever visit in
+        that language — rather than only for pages someone actually looks
+        at. The crawl is capped and runs in the background; it never delays
+        the shopper who triggered it.
+      </>
+    ),
+  },
 ];
 
 export default function FaqPage() {

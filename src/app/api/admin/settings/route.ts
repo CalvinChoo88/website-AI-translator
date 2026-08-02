@@ -13,6 +13,7 @@ export async function GET() {
     sourceLocale: shop.sourceLocale,
     enabledLocales: JSON.parse(shop.enabledLocales || "[]") as string[],
     autoDetect: shop.autoDetect,
+    autoWarmOnFirstUse: shop.autoWarmOnFirstUse,
     provider: getTranslationProviderName(),
     // null means "no extra restriction beyond the full catalog"
     providerSupportedLocales: getProviderSupportedLocales(),
@@ -22,6 +23,7 @@ export async function GET() {
 interface SettingsBody {
   enabledLocales?: string[];
   autoDetect?: boolean;
+  autoWarmOnFirstUse?: boolean;
   sourceLocale?: string;
 }
 
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
         enabledLocales: JSON.stringify(body.enabledLocales),
       }),
       ...(body.autoDetect !== undefined && { autoDetect: body.autoDetect }),
+      ...(body.autoWarmOnFirstUse !== undefined && { autoWarmOnFirstUse: body.autoWarmOnFirstUse }),
       ...(body.sourceLocale !== undefined && { sourceLocale: body.sourceLocale }),
     },
   });
@@ -63,5 +66,6 @@ export async function POST(req: NextRequest) {
     sourceLocale: updated.sourceLocale,
     enabledLocales: JSON.parse(updated.enabledLocales || "[]") as string[],
     autoDetect: updated.autoDetect,
+    autoWarmOnFirstUse: updated.autoWarmOnFirstUse,
   });
 }

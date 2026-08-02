@@ -22,11 +22,18 @@ model Shop {
   // across SQLite/Postgres/MySQL.
   enabledLocales String    @default("[]")
   autoDetect     Boolean   @default(true)
+  // Opt-in: when a shopper first picks a locale that's never been used
+  // on this shop, crawl the storefront in the background and translate
+  // every page into it, so later shoppers never hit an uncached page.
+  // Off by default — it spends translation-provider quota proactively
+  // rather than only for pages someone actually views.
+  autoWarmOnFirstUse Boolean   @default(false)
   installedAt    DateTime  @default(now())
   uninstalledAt  DateTime?
   updatedAt      DateTime  @updatedAt
 
   translations Translation[]
+  localeWarms  LocaleWarm[]
 }
 
 model Translation {
@@ -43,4 +50,28 @@ model Translation {
 
   @@unique([shopId, locale, sourceHash])
   @@index([shopId, locale])
+}
+
+// Tracks a background crawl-and-translate run for one shop+locale,
+// triggered by the first shopper who picks that locale (when the shop
+// has autoWarmOnFirstUse enabled). One row per shop+locale ever
+// warmed — the unique constraint is what stops two shoppers picking
+// the same new locale at once from starting duplicate crawls.
+model LocaleWarm {
+  id           String   @id @default(cuid())
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shopId       String
+  locale       String
+  status       String   @default("running") // running | done | failed
+  // Same-origin storefront URLs already crawled and queued-but-not-yet
+  // crawled, as JSON string[]. A single run is a sequential chain of
+  // self-invoking batches (see /api/internal/warm-locale), so this
+  // never has concurrent writers.
+  visitedJson  String   @default("[]")
+  frontierJson String   @default("[]")
+  pagesDone    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shopId, locale])
 }

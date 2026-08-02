@@ -23,6 +23,10 @@
  *    cross-origin iframes — content deliberately isolated there (e.g.
  *    a platform's own payment/PII form, for security reasons) stays
  *    untouched, by design.
+ *  - Sends the current page URL with every translate call so that,
+ *    if the merchant has opted into auto-warm, the server can use it
+ *    as a starting point for a background crawl of the rest of the
+ *    storefront the first time a given locale is used.
  */
 (function () {
   "use strict";
@@ -215,7 +219,12 @@
         return fetchJson(API_BASE + "/api/translate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ shop: SHOP, locale: targetLocale, texts: chunkTexts }),
+          body: JSON.stringify({
+            shop: SHOP,
+            locale: targetLocale,
+            texts: chunkTexts,
+            pageUrl: location.href,
+          }),
         }).then(function (data) {
           if (requestId !== currentRequestId) return; // superseded by a newer selection
           chunkTexts.forEach(function (key, idx) {

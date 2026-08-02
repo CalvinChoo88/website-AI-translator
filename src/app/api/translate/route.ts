@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { corsJson, corsPreflight } from "@/lib/cors";
 import { translateBatchCached } from "@/lib/translation/cache";
 import { getProviderSupportedLocales } from "@/lib/translation";
+import { triggerWarmIfNeeded } from "@/lib/warm/run";
 
 export function OPTIONS() {
   return corsPreflight();
@@ -15,6 +16,8 @@ interface TranslateRequestBody {
   shop?: string;
   locale?: string;
   texts?: string[];
+  /** The shopper's current page URL — used only as the crawl seed if this locale triggers auto-warm. */
+  pageUrl?: string;
 }
 
 /**
@@ -37,7 +40,7 @@ export async function POST(req: NextRequest) {
     return corsJson({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { shop: shopDomain, locale, texts } = body;
+  const { shop: shopDomain, locale, texts, pageUrl } = body;
   if (!shopDomain || !locale || !Array.isArray(texts)) {
     return corsJson({ error: "Missing shop, locale, or texts[]" }, { status: 400 });
   }
@@ -60,6 +63,15 @@ export async function POST(req: NextRequest) {
   const providerSupported = getProviderSupportedLocales();
   if (!enabledCodes.includes(locale) || (providerSupported && !providerSupported.includes(locale))) {
     return corsJson({ error: "Locale not enabled for this shop" }, { status: 400 });
+  }
+
+  // Opt-in: the first shopper to use a given locale on this shop kicks
+  // off a background crawl that translates the rest of the storefront
+  // into it, so later shoppers land on already-cached pages instead of
+  // only whatever pages happened to be visited so far. A no-op after
+  // the first trigger per shop+locale (see triggerWarmIfNeeded).
+  if (shop.autoWarmOnFirstUse && pageUrl) {
+    await triggerWarmIfNeeded(shop.id, locale, pageUrl);
   }
 
   try {

@@ -74,6 +74,19 @@ geo-aware site, and can override it in the dropdown either way.
    before any translation is applied.
 4. **Uninstall webhook** — `/api/webhooks/app-uninstalled` verifies the
    `EasyStore-Hmac-SHA256` signature and marks the shop inactive.
+5. **Auto-warm** (opt-in, `Shop.autoWarmOnFirstUse`) — by default a
+   page is only translated into a given locale the first time a real
+   shopper views it. If a merchant turns this on, the first shopper
+   ever to pick a new locale triggers a background crawl
+   (`src/lib/warm/`) that follows same-origin links out from the page
+   they're on and translates each one it finds, so later shoppers are
+   much less likely to land on an uncached page. It runs as a chain of
+   small batches (`/api/internal/warm-locale`, guarded by
+   `INTERNAL_JOB_SECRET` rather than a session — there isn't one in
+   this context) using Next's `after()` so it never delays the
+   shopper who triggered it, and is capped at 150 pages per shop+locale
+   so one shopper's language pick can't run away translating an
+   unbounded catalog.
 
 ## Setup
 
@@ -96,6 +109,7 @@ npm run dev
 | `EASYSTORE_SCOPES` | Comma-separated, from EasyStore's confirmed scope list (see `.env.example`) — no `read_store`, that scope doesn't exist; default is `read_products,read_content` |
 | `APP_URL` | Public base URL of this deployment; must match the redirect URL registered in the Partner Dashboard |
 | `SESSION_SECRET` | Random secret for the admin session cookie (`openssl rand -hex 32`) |
+| `INTERNAL_JOB_SECRET` | Random secret (`openssl rand -hex 32`, different from `SESSION_SECRET`) authenticating this app's own background-crawl calls to itself. Only needed if a merchant enables "auto-translate the rest of my storefront" in `/admin`; without it, that setting silently no-ops instead of erroring |
 | `TRANSLATION_PROVIDER` | `deepl` (default), `azure`, or `google` |
 | `DEEPL_API_KEY` | DeepL API key from https://www.deepl.com/pro-api — free tier = 500K chars/month. Free-tier keys end in `:fx`; the app auto-selects the free vs. pro endpoint from that suffix |
 | `AZURE_TRANSLATOR_KEY` | Only needed if `TRANSLATION_PROVIDER=azure` (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
@@ -138,8 +152,9 @@ npm run dev
    `{your-url}/api/auth/callback` for the Redirect URL.
 5. **Add the remaining environment variables** (`EASYSTORE_CLIENT_ID`,
    `EASYSTORE_CLIENT_SECRET`, `EASYSTORE_SCOPES`, `APP_URL` set to your
-   real Vercel URL, `SESSION_SECRET`, `DEEPL_API_KEY`) in Vercel's
-   Environment Variables settings, then redeploy so they take effect.
+   real Vercel URL, `SESSION_SECRET`, `INTERNAL_JOB_SECRET`,
+   `DEEPL_API_KEY`) in Vercel's Environment Variables settings, then
+   redeploy so they take effect.
 
 ## Things verified vs. assumed
 
@@ -216,3 +231,22 @@ Still not confirmed (flagged in code comments where used):
   exercise — no `next/image` remote optimization, no untrusted CSS
   processing). No fix is available upstream yet; monitor for a patched
   Next release.
+- **Auto-warm (`src/lib/warm/`) discovers pages by following
+  same-origin links, not a sitemap.** EasyStore's sitemap availability
+  couldn't be confirmed (fetches to a test store's `/sitemap.xml`
+  403'd during development — unclear whether that was the store being
+  password-protected as a dev store, or an unrelated block), so the
+  crawl instead starts from whatever page the triggering shopper is on
+  and follows `<a href>` links outward. This means pages with no
+  inbound link from anywhere the crawl reaches (e.g. an orphaned
+  product) won't get pre-warmed — they'll still translate normally the
+  first time a shopper actually visits them, same as with auto-warm
+  off.
+- **A stalled auto-warm run doesn't automatically resume.** Each
+  shop+locale gets one `LocaleWarm` row (enforced by a unique
+  constraint) and the crawl is a self-continuing chain of requests; if
+  one hop in that chain fails to fire (e.g. a transient network error),
+  the run just stops with whatever pages it had already cached — it
+  won't retry or restart on its own. Not currently exposed in
+  `/admin`; a "resume stalled warms" admin action would be a
+  reasonable follow-up.

@@ -27,6 +27,7 @@ export default async function AdminPage() {
       initialSourceLocale={shop.sourceLocale}
       initialEnabledLocales={JSON.parse(shop.enabledLocales || "[]")}
       initialAutoDetect={shop.autoDetect}
+      initialAutoWarmOnFirstUse={shop.autoWarmOnFirstUse}
       providerSupportedLocales={getProviderSupportedLocales()}
     />
   );

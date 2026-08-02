@@ -9,6 +9,7 @@ interface Props {
   initialSourceLocale: string;
   initialEnabledLocales: string[];
   initialAutoDetect: boolean;
+  initialAutoWarmOnFirstUse: boolean;
   /** null = provider supports the full catalog, no filtering needed. */
   providerSupportedLocales: string[] | null;
 }
@@ -18,6 +19,7 @@ export function AdminSettingsForm({
   initialSourceLocale,
   initialEnabledLocales,
   initialAutoDetect,
+  initialAutoWarmOnFirstUse,
   providerSupportedLocales,
 }: Props) {
   const [sourceLocale] = useState(initialSourceLocale);
@@ -29,6 +31,7 @@ export function AdminSettingsForm({
     () => new Set(initialEnabledLocales.filter((c) => !supportedSet || supportedSet.has(c))),
   );
   const [autoDetect, setAutoDetect] = useState(initialAutoDetect);
+  const [autoWarmOnFirstUse, setAutoWarmOnFirstUse] = useState(initialAutoWarmOnFirstUse);
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [copied, setCopied] = useState(false);
@@ -67,7 +70,7 @@ export function AdminSettingsForm({
       const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabledLocales: [...enabled], autoDetect }),
+        body: JSON.stringify({ enabledLocales: [...enabled], autoDetect, autoWarmOnFirstUse }),
       });
       setStatus(res.ok ? "saved" : "error");
     } catch {
@@ -104,6 +107,23 @@ export function AdminSettingsForm({
           Suggest a language automatically based on visitor location (shoppers
           can always change it, and their choice is remembered)
         </label>
+      </section>
+
+      <section style={{ margin: "24px 0" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={autoWarmOnFirstUse}
+            onChange={(e) => setAutoWarmOnFirstUse(e.target.checked)}
+          />
+          Auto-translate the rest of my storefront the first time a
+          shopper picks a new language (otherwise each page is
+          translated the first time any shopper actually views it)
+        </label>
+        <p style={{ color: "#777", fontSize: 13, margin: "4px 0 0 24px" }}>
+          Off by default — this proactively spends translation-provider
+          quota on pages nobody has visited yet in that language.
+        </p>
       </section>
 
       <section>
