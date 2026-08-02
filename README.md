@@ -32,7 +32,9 @@ geo-aware site, and can override it in the dropdown either way.
   backend, behind a `TranslationProvider` interface (`src/lib/translation/`)
   — swap providers via `TRANSLATION_PROVIDER`. Azure AI Translator and
   Google Cloud Translation are also implemented and selectable the same
-  way for broader language coverage.
+  way for broader language coverage, or combined with DeepL via
+  `TRANSLATION_FALLBACK_PROVIDER` (DeepL handles what it supports,
+  the fallback covers the rest) rather than an all-or-nothing choice.
 - A vanilla-JS storefront widget (`public/widget/translator.js`, no
   build step, no framework dependency) that merchants embed with one
   `<script>` tag.
@@ -111,10 +113,11 @@ npm run dev
 | `SESSION_SECRET` | Random secret for the admin session cookie (`openssl rand -hex 32`) |
 | `INTERNAL_JOB_SECRET` | Random secret (`openssl rand -hex 32`, different from `SESSION_SECRET`) authenticating this app's own background-crawl calls to itself. Only needed if a merchant enables "auto-translate the rest of my storefront" in `/admin`; without it, that setting silently no-ops instead of erroring |
 | `TRANSLATION_PROVIDER` | `deepl` (default), `azure`, or `google` |
+| `TRANSLATION_FALLBACK_PROVIDER` | Optional, only meaningful with `TRANSLATION_PROVIDER=deepl`. Set to `azure` or `google` to auto-translate locales DeepL doesn't support (~35-language limit) with that provider instead, while DeepL keeps handling everything it does support — opens the admin's language picker to the full ~130-language catalog |
 | `DEEPL_API_KEY` | DeepL API key from https://www.deepl.com/pro-api — free tier = 500K chars/month. Free-tier keys end in `:fx`; the app auto-selects the free vs. pro endpoint from that suffix |
-| `AZURE_TRANSLATOR_KEY` | Only needed if `TRANSLATION_PROVIDER=azure` (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
+| `AZURE_TRANSLATOR_KEY` | Needed if `TRANSLATION_PROVIDER=azure` or `TRANSLATION_FALLBACK_PROVIDER=azure` (Azure Portal > create a "Translator" resource; free F0 tier = 2M chars/month) |
 | `AZURE_TRANSLATOR_REGION` | Only required for a *regional* Azure Translator resource — leave blank for a "Global" resource |
-| `GOOGLE_TRANSLATE_API_KEY` | Only needed if `TRANSLATION_PROVIDER=google` |
+| `GOOGLE_TRANSLATE_API_KEY` | Needed if `TRANSLATION_PROVIDER=google` or `TRANSLATION_FALLBACK_PROVIDER=google` |
 | `GEOIP_FALLBACK_API_URL` | Used only off-Vercel, where the `x-vercel-ip-country` header isn't available |
 
 ### Partner Dashboard setup
@@ -196,14 +199,19 @@ Still not confirmed (flagged in code comments where used):
 
 ## Known limitations / next steps
 
-- **DeepL trades coverage for quality.** DeepL supports ~35 languages
-  vs. ~130 for Azure/Google — the admin picker and both API routes
-  (`/api/admin/settings`, `/api/translate`, `/api/widget/config`)
-  enforce this automatically via `getProviderSupportedLocales()`
-  (`src/lib/translation/index.ts`), so a merchant can never enable —
-  and the widget can never request — a language DeepL doesn't support.
-  If a store needs "most languages in the world" over translation
-  quality, switch `TRANSLATION_PROVIDER` to `azure` or `google`.
+- **DeepL trades coverage for quality — solvable with a fallback
+  provider.** DeepL supports ~35 languages vs. ~130 for Azure/Google —
+  the admin picker and both API routes (`/api/admin/settings`,
+  `/api/translate`, `/api/widget/config`) enforce this automatically
+  via `getProviderSupportedLocales()` (`src/lib/translation/index.ts`),
+  so a merchant can never enable — and the widget can never request —
+  a language nothing configured can translate. Two ways to get around
+  it: switch `TRANSLATION_PROVIDER` to `azure` or `google` outright
+  (full coverage, lower quality for every language), or set
+  `TRANSLATION_FALLBACK_PROVIDER` alongside `TRANSLATION_PROVIDER=deepl`
+  to keep DeepL for the ~35 languages it covers and route only the
+  remaining locales to the fallback (`getTranslationProviderForLocale`
+  resolves this per target locale, not once for the whole app).
 - **DeepL's supported-language list (`src/lib/translation/deepl.ts`)
   and locale-code mapping aren't exhaustively verified.** DeepL's docs
   403'd during development; the list of ~32 languages and their codes

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
-import { getTranslationProvider } from "./index";
+import { getTranslationProviderForLocale } from "./index";
 import { mapWithConcurrency } from "./concurrency";
 
 function hashText(text: string): string {
@@ -43,7 +43,11 @@ export async function translateBatchCached(
   });
 
   if (missTexts.length > 0) {
-    const provider = getTranslationProvider();
+    // Resolved per target locale, not once for the whole app: with a
+    // fallback provider configured, a locale DeepL doesn't support is
+    // served by that fallback instead, while everything DeepL does
+    // support still goes through DeepL.
+    const provider = getTranslationProviderForLocale(targetLocale);
     const translated = await provider.translateBatch(missTexts, targetLocale, sourceLocale);
 
     // upsert (not createMany + skipDuplicates, which SQLite doesn't
