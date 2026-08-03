@@ -39,12 +39,11 @@ function fireContinue(localeWarmId: string) {
 }
 
 /**
- * Called from /api/translate when a shop has autoWarmOnFirstUse
- * enabled and a shopper picks a locale that's never been warmed. The
- * unique (shopId, locale) constraint on LocaleWarm is what stops two
- * shoppers picking the same new locale at once from starting
- * duplicate crawls — whichever request's create() wins starts it,
- * the other just returns.
+ * Low-level: starts a crawl for one shop+locale. The unique
+ * (shopId, locale) constraint on LocaleWarm is what stops two
+ * concurrent callers from starting duplicate crawls for the same
+ * locale — whichever request's create() wins starts it, the other
+ * just returns.
  */
 export async function triggerWarmIfNeeded(
   shopId: string,
@@ -64,10 +63,47 @@ export async function triggerWarmIfNeeded(
     fireContinue(created.id);
   } catch (err) {
     if ((err as { code?: string }).code === "P2002") return; // already running or done
-    // A failure here must never break the shopper's actual translate
-    // request — auto-warm is a background nicety, not a dependency.
+    // A failure here must never break the caller's own request —
+    // auto-warm is a background nicety, not a dependency.
     console.error("[warm] failed to start locale warm", err);
   }
+}
+
+/**
+ * Called by the widget only when a shopper is viewing the storefront
+ * in its original language — i.e. this specific visitor generates no
+ * live /api/translate demand, so it's a moment with spare DeepL/DB
+ * capacity rather than one competing with it. Deliberately NOT
+ * triggered when a shopper picks a locale that needs live
+ * translation — that's exactly the moment a background crawl would
+ * compete with them for the same DeepL concurrency and DB connection
+ * pool, which is what caused real-world page loads to stall for
+ * 30-90s in practice.
+ *
+ * Picks the next enabled locale that's never been warmed, and only if
+ * no other locale is currently mid-crawl for this shop — one crawl at
+ * a time per shop, so this can't just relocate the same contention
+ * across multiple locales running together.
+ */
+export async function triggerNextWarmIfIdle(
+  shopId: string,
+  enabledLocales: string[],
+  seedUrl: string,
+): Promise<void> {
+  if (!process.env.INTERNAL_JOB_SECRET) return;
+  if (enabledLocales.length === 0) return;
+
+  const existing = await db.localeWarm.findMany({
+    where: { shopId },
+    select: { locale: true, status: true },
+  });
+  if (existing.some((r) => r.status === "running")) return;
+
+  const warmed = new Set(existing.map((r) => r.locale));
+  const next = enabledLocales.find((locale) => !warmed.has(locale));
+  if (!next) return; // every enabled locale already warmed or attempted
+
+  await triggerWarmIfNeeded(shopId, next, seedUrl);
 }
 
 /** Processes one batch of pages for a crawl-in-progress, then schedules the next batch if any work remains. */

@@ -94,15 +94,20 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
         actually views it in a given language — so the very first shopper to
         reach a page pays a small wait, and everyone after (on any page,
         any device) gets the cached result instantly. Turning this setting
-        on changes that: the moment any shopper picks a new language, the
-        app starts crawling the rest of your storefront in the background
-        and translating it into that language too, so later shoppers are
-        far less likely to land on a page that hasn&rsquo;t been translated
-        yet. It&rsquo;s off by default because it spends translation-provider
-        quota proactively — including on pages nobody may ever visit in
-        that language — rather than only for pages someone actually looks
-        at. The crawl is capped and runs in the background; it never delays
-        the shopper who triggered it.
+        on changes that: whenever a shopper is browsing your store in its
+        original language (not needing any translation themselves), the app
+        uses that quiet moment to crawl the rest of your storefront in the
+        background and translate it into one of your enabled languages, so
+        later shoppers are far less likely to land on a page that
+        hasn&rsquo;t been translated yet. It deliberately waits for a
+        moment like that rather than starting the moment someone picks a
+        new language — doing it then would compete with that shopper&rsquo;s
+        own translation for the same resources and could slow their page
+        down. It&rsquo;s off by default because it spends
+        translation-provider quota proactively — including on pages nobody
+        may ever visit in that language — rather than only for pages
+        someone actually looks at. The crawl is capped, covers one language
+        at a time, and runs in the background without delaying anyone.
       </>
     ),
   },

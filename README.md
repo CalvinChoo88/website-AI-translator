@@ -78,17 +78,24 @@ geo-aware site, and can override it in the dropdown either way.
    `EasyStore-Hmac-SHA256` signature and marks the shop inactive.
 5. **Auto-warm** (opt-in, `Shop.autoWarmOnFirstUse`) — by default a
    page is only translated into a given locale the first time a real
-   shopper views it. If a merchant turns this on, the first shopper
-   ever to pick a new locale triggers a background crawl
-   (`src/lib/warm/`) that follows same-origin links out from the page
-   they're on and translates each one it finds, so later shoppers are
-   much less likely to land on an uncached page. It runs as a chain of
-   small batches (`/api/internal/warm-locale`, guarded by
-   `INTERNAL_JOB_SECRET` rather than a session — there isn't one in
-   this context) using Next's `after()` so it never delays the
-   shopper who triggered it, and is capped at 150 pages per shop+locale
-   so one shopper's language pick can't run away translating an
-   unbounded catalog.
+   shopper views it. If a merchant turns this on, a background crawl
+   (`src/lib/warm/`) follows same-origin links out from wherever it
+   starts and translates each page it finds into one enabled locale at
+   a time, so later shoppers are much less likely to land on an
+   uncached page. Triggered from `/api/widget/warm-signal`
+   (`public/widget/translator.js`) only when a shopper is viewing the
+   storefront in its *original* language — deliberately not when
+   someone picks a locale that needs live translation, since starting
+   a crawl at that exact moment would compete with that shopper's own
+   request for the same DeepL concurrency and DB connection pool (this
+   was tried first and measurably slowed real page loads — 30-90s in
+   practice — before being redesigned this way). Only one locale
+   crawls at a time per shop, progressing to the next un-warmed locale
+   once the current one finishes. Runs as a chain of small batches
+   (`/api/internal/warm-locale`, guarded by `INTERNAL_JOB_SECRET`
+   rather than a session — there isn't one in this context) using
+   Next's `after()` so it never delays whichever request triggered it,
+   and is capped at 150 pages per shop+locale.
 
 ## Setup
 

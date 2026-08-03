@@ -23,10 +23,13 @@
  *    cross-origin iframes — content deliberately isolated there (e.g.
  *    a platform's own payment/PII form, for security reasons) stays
  *    untouched, by design.
- *  - Sends the current page URL with every translate call so that,
- *    if the merchant has opted into auto-warm, the server can use it
- *    as a starting point for a background crawl of the rest of the
- *    storefront the first time a given locale is used.
+ *  - If the merchant has opted into auto-warm, signals the server
+ *    whenever this visitor is viewing the original language (i.e.
+ *    generating no live translation demand) so it's a safe moment to
+ *    progress a background crawl of the rest of the storefront into
+ *    another enabled locale — deliberately not triggered by a
+ *    shopper who's actively waiting on a live translation, so the
+ *    crawl never competes with them for the same capacity.
  */
 (function () {
   "use strict";
@@ -223,7 +226,6 @@
             shop: SHOP,
             locale: targetLocale,
             texts: chunkTexts,
-            pageUrl: location.href,
           }),
         }).then(function (data) {
           if (requestId !== currentRequestId) return; // superseded by a newer selection
@@ -359,6 +361,19 @@
     return select;
   }
 
+  // Tells the server this visitor is viewing the original language —
+  // i.e. generating no live translation demand right now — so it's a
+  // safe moment to progress the background auto-warm crawl, if the
+  // merchant has it enabled. Best-effort and silent either way; never
+  // affects what the shopper sees.
+  function signalIdleForWarm() {
+    fetchJson(API_BASE + "/api/widget/warm-signal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shop: SHOP, pageUrl: location.href }),
+    }).catch(function () {});
+  }
+
   function init() {
     fetchJson(API_BASE + "/api/widget/config?shop=" + encodeURIComponent(SHOP))
       .then(function (config) {
@@ -397,6 +412,7 @@
           activeTargetLocale = config.sourceLocale;
           captureOriginals(collectTextNodes(document.body));
           capturePlaceholders(collectPlaceholderElements(document.body));
+          signalIdleForWarm();
         }
         if (!saved) setCookie(COOKIE_NAME, initialLocale);
 
@@ -404,6 +420,7 @@
           var target = select.value;
           setCookie(COOKIE_NAME, target);
           withLoadingState(applyTranslations(config.sourceLocale, target));
+          if (target === config.sourceLocale) signalIdleForWarm();
         });
       })
       .catch(function (err) {
