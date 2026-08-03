@@ -17,6 +17,10 @@ const MAX_CHARS_PER_REQUEST = 40000;
 // How many chunk requests to run in parallel.
 const CHUNK_CONCURRENCY = 5;
 
+// Without this, a slow/hung Azure response has nothing capping it and
+// blocks the shopper's request indefinitely.
+const REQUEST_TIMEOUT_MS = 10000;
+
 // Our language catalog (src/lib/languages.ts) mostly uses Google
 // Translate-style codes; Azure uses BCP-47 codes that diverge for a
 // handful of languages. Confirmed divergences only — everything else
@@ -86,6 +90,7 @@ export class AzureTranslateProvider implements TranslationProvider {
         method: "POST",
         headers,
         body: JSON.stringify(batch.map((text) => ({ Text: text }))),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
 
       if (!res.ok) {

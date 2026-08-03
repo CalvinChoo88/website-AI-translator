@@ -18,6 +18,10 @@ const MAX_CHARS_PER_REQUEST = 40000;
 // simultaneous requests, per their own docs.
 const CHUNK_CONCURRENCY = 3;
 
+// Without this, a slow/hung DeepL response has nothing capping it and
+// blocks the shopper's request indefinitely.
+const REQUEST_TIMEOUT_MS = 10000;
+
 /**
  * Our language catalog (src/lib/languages.ts) covers ~130 languages;
  * DeepL only supports a subset. Source lang codes don't need a
@@ -126,6 +130,7 @@ export class DeepLTranslateProvider implements TranslationProvider {
           target_lang: target.target,
           ...(source && { source_lang: source.source }),
         }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
 
       if (!res.ok) {

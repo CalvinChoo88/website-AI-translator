@@ -13,6 +13,10 @@ const BATCH_SIZE = 100;
 // How many chunk requests to run in parallel.
 const CHUNK_CONCURRENCY = 5;
 
+// Without this, a slow/hung Google response has nothing capping it and
+// blocks the shopper's request indefinitely.
+const REQUEST_TIMEOUT_MS = 10000;
+
 interface GoogleTranslateResponse {
   data: { translations: { translatedText: string }[] };
 }
@@ -43,7 +47,10 @@ export class GoogleTranslateProvider implements TranslationProvider {
       });
       for (const text of batch) params.append("q", text);
 
-      const res = await fetch(`${ENDPOINT}?${params.toString()}`, { method: "POST" });
+      const res = await fetch(`${ENDPOINT}?${params.toString()}`, {
+        method: "POST",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(`Google Translate request failed (${res.status}): ${body}`);
