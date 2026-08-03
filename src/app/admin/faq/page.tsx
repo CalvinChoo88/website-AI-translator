@@ -19,10 +19,10 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
         The very first time any shopper selects a given language on your
         store, every piece of text on the page has to be translated live —
         that has real latency. Every translation is then cached, so the same
-        text on any page, for any shopper, loads instantly after that. If a
-        language feels slow again later, it&rsquo;s because it hit text that
-        genuinely hasn&rsquo;t been translated yet (a new product, a new
-        page) — that specific text will be slow once, then fast forever.
+        text on any page loads instantly after that. If a language feels
+        slow again later, it&rsquo;s because it hit text that genuinely
+        hasn&rsquo;t been translated yet (a new product, a new page) — that
+        specific text will be slow once, then fast forever.
       </>
     ),
   },
@@ -75,26 +75,12 @@ const FAQS: { q: string; a: React.ReactNode }[] = [
     a: "It switches the page back to exactly what you wrote — no translation applied, regardless of which language a shopper had selected before.",
   },
   {
-    q: "Does translating my store cost anything extra per visitor?",
-    a: (
-      <>
-        No — translation happens once per unique piece of text per language,
-        then is reused for every visitor after that. A busy store doesn&rsquo;t
-        cost more to translate than a quiet one; a store with a lot of unique
-        product copy in many languages does more work up front, but only
-        once per string.
-      </>
-    ),
-  },
-  {
     q: 'What does "auto-translate the rest of my storefront" do?',
     a: (
       <>
         By default, each page is translated the first time any shopper
-        actually views it in a given language — so the very first shopper to
-        reach a page pays a small wait, and everyone after (on any page,
-        any device) gets the cached result instantly. Turning this setting
-        on changes that: whenever a shopper is browsing your store in its
+        actually views it in a given language. Turning this setting on
+        changes that: whenever a shopper is browsing your store in its
         original language (not needing any translation themselves), the app
         uses that quiet moment to crawl the rest of your storefront in the
         background and translate it into one of your enabled languages, so
