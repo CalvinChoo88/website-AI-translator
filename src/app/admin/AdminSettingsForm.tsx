@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { LANGUAGES } from "@/lib/languages";
 
@@ -35,6 +36,17 @@ export function AdminSettingsForm({
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [copied, setCopied] = useState(false);
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [showThanks, setShowThanks] = useState(() => searchParams.get("upgraded") === "true");
+
+  function dismissThanks() {
+    setShowThanks(false);
+    // Strip ?upgraded=true so a page refresh doesn't re-show the popup.
+    router.replace(pathname);
+  }
 
   const selectableLanguages = useMemo(
     () =>
@@ -86,6 +98,50 @@ export function AdminSettingsForm({
 
   return (
     <main style={{ maxWidth: 720, margin: "40px auto", padding: "0 24px", lineHeight: 1.5 }}>
+      {showThanks && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 10,
+              padding: 28,
+              maxWidth: 360,
+              textAlign: "center",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+            }}
+          >
+            <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>Thanks for upgrading!</h2>
+            <p style={{ color: "#555", margin: "0 0 20px" }}>
+              Your plan is now active. It may take a moment to reflect here.
+            </p>
+            <button
+              onClick={dismissThanks}
+              style={{
+                padding: "8px 20px",
+                background: "#111",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1>Translation settings</h1>
         <Link href="/admin/faq" style={{ fontSize: 14 }}>
