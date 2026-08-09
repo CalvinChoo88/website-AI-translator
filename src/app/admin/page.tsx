@@ -23,8 +23,8 @@ export default async function AdminPage() {
 
   const plans = [
     { name: "Starter", price: "$12/mo", url: process.env.STRIPE_PAYMENT_LINK_STARTER },
-    { name: "Growth", price: "$29/mo", url: process.env.STRIPE_PAYMENT_LINK_GROWTH },
-    { name: "Business", price: "$59/mo", url: process.env.STRIPE_PAYMENT_LINK_BUSINESS },
+    { name: "Business", price: "$29/mo", url: process.env.STRIPE_PAYMENT_LINK_BUSINESS },
+    { name: "Elite", price: "$59/mo", url: process.env.STRIPE_PAYMENT_LINK_ELITE },
   ].filter((plan): plan is { name: string; price: string; url: string } => Boolean(plan.url));
 
   return (
