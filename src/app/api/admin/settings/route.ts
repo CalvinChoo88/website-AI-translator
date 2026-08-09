@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getSessionShop } from "@/lib/adminAuth";
 import { isSupportedLocale } from "@/lib/languages";
 import { getTranslationProviderName, getProviderSupportedLocales } from "@/lib/translation";
+import { localeLimitForPlan } from "@/lib/plans";
 
 export async function GET() {
   const shop = await getSessionShop();
@@ -14,6 +15,8 @@ export async function GET() {
     enabledLocales: JSON.parse(shop.enabledLocales || "[]") as string[],
     autoDetect: shop.autoDetect,
     autoWarmOnFirstUse: shop.autoWarmOnFirstUse,
+    plan: shop.plan,
+    localeLimit: localeLimitForPlan(shop.plan),
     provider: getTranslationProviderName(),
     // null means "no extra restriction beyond the full catalog"
     providerSupportedLocales: getProviderSupportedLocales(),
@@ -41,6 +44,14 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(body.enabledLocales) || !allSupported) {
       return NextResponse.json(
         { error: "enabledLocales contains a locale the active translation provider doesn't support" },
+        { status: 400 },
+      );
+    }
+
+    const limit = localeLimitForPlan(shop.plan);
+    if (limit !== null && body.enabledLocales.length > limit) {
+      return NextResponse.json(
+        { error: `Your plan allows up to ${limit} language(s) — upgrade to enable more.` },
         { status: 400 },
       );
     }

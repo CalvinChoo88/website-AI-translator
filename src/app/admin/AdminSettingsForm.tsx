@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { LANGUAGES } from "@/lib/languages";
+import { localeLimitForPlan, planLabel } from "@/lib/plans";
 
 interface Props {
   domain: string;
@@ -11,6 +12,7 @@ interface Props {
   initialEnabledLocales: string[];
   initialAutoDetect: boolean;
   initialAutoWarmOnFirstUse: boolean;
+  plan: string;
   /** null = provider supports the full catalog, no filtering needed. */
   providerSupportedLocales: string[] | null;
 }
@@ -21,8 +23,10 @@ export function AdminSettingsForm({
   initialEnabledLocales,
   initialAutoDetect,
   initialAutoWarmOnFirstUse,
+  plan,
   providerSupportedLocales,
 }: Props) {
+  const localeLimit = localeLimitForPlan(plan);
   const [sourceLocale] = useState(initialSourceLocale);
   const supportedSet = useMemo(
     () => (providerSupportedLocales ? new Set(providerSupportedLocales) : null),
@@ -35,6 +39,7 @@ export function AdminSettingsForm({
   const [autoWarmOnFirstUse, setAutoWarmOnFirstUse] = useState(initialAutoWarmOnFirstUse);
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const router = useRouter();
@@ -69,22 +74,35 @@ export function AdminSettingsForm({
 
   function toggle(code: string) {
     setEnabled((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
+      if (prev.has(code)) {
+        const next = new Set(prev);
+        next.delete(code);
+        return next;
+      }
+      // At the plan's cap: allow unchecking existing selections, but
+      // silently refuse to add a new one instead of letting the
+      // request fail server-side after the fact.
+      if (localeLimit !== null && prev.size >= localeLimit) return prev;
+      return new Set(prev).add(code);
     });
   }
 
   async function save() {
     setStatus("saving");
+    setErrorMessage(null);
     try {
       const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabledLocales: [...enabled], autoDetect, autoWarmOnFirstUse }),
       });
-      setStatus(res.ok ? "saved" : "error");
+      if (res.ok) {
+        setStatus("saved");
+      } else {
+        const body = await res.json().catch(() => null);
+        setErrorMessage(body?.error ?? null);
+        setStatus("error");
+      }
     } catch {
       setStatus("error");
     }
@@ -150,7 +168,8 @@ export function AdminSettingsForm({
       </div>
       <p style={{ color: "#555" }}>
         Store: <strong>{domain}</strong> &middot; Source language:{" "}
-        <strong>{sourceLocale}</strong>
+        <strong>{sourceLocale}</strong> &middot; Plan: <strong>{planLabel(plan)}</strong>{" "}
+        {localeLimit !== null && `(up to ${localeLimit} language${localeLimit === 1 ? "" : "s"})`}
       </p>
 
       <section style={{ margin: "24px 0" }}>
@@ -189,6 +208,12 @@ export function AdminSettingsForm({
             Showing the {supportedSet.size} languages your translation provider supports.
           </p>
         )}
+        {localeLimit !== null && enabled.size > localeLimit && (
+          <p style={{ color: "#b45309", fontSize: 13 }}>
+            You have more languages enabled than your {planLabel(plan)} plan allows —
+            uncheck some or upgrade to keep them all.
+          </p>
+        )}
         <input
           type="text"
           placeholder="Search languages…"
@@ -208,16 +233,28 @@ export function AdminSettingsForm({
             padding: 12,
           }}
         >
-          {visibleLanguages.map((lang) => (
-            <label key={lang.code} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={enabled.has(lang.code)}
-                onChange={() => toggle(lang.code)}
-              />
-              {lang.name}
-            </label>
-          ))}
+          {visibleLanguages.map((lang) => {
+            const atCap = localeLimit !== null && enabled.size >= localeLimit && !enabled.has(lang.code);
+            return (
+              <label
+                key={lang.code}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  color: atCap ? "#aaa" : undefined,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={enabled.has(lang.code)}
+                  disabled={atCap}
+                  onChange={() => toggle(lang.code)}
+                />
+                {lang.name}
+              </label>
+            );
+          })}
         </div>
         <p style={{ color: "#777", fontSize: 13 }}>{enabled.size} language(s) selected</p>
       </section>
@@ -237,7 +274,9 @@ export function AdminSettingsForm({
         {status === "saving" ? "Saving…" : "Save settings"}
       </button>
       {status === "saved" && <span style={{ marginLeft: 12, color: "green" }}>Saved</span>}
-      {status === "error" && <span style={{ marginLeft: 12, color: "crimson" }}>Save failed</span>}
+      {status === "error" && (
+        <span style={{ marginLeft: 12, color: "crimson" }}>{errorMessage ?? "Save failed"}</span>
+      )}
 
       <section style={{ marginTop: 40 }}>
         <h2 style={{ fontSize: 18 }}>Add to your storefront</h2>

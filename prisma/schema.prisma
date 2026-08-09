@@ -28,6 +28,14 @@ model Shop {
   // Off by default — it spends translation-provider quota proactively
   // rather than only for pages someone actually views.
   autoWarmOnFirstUse Boolean   @default(false)
+  // "free" | "starter" | "business" | "elite" — see src/lib/plans.ts.
+  // Written only by the Stripe webhook (checkout.session.completed /
+  // customer.subscription.deleted); never trust a client-set value.
+  plan             String    @default("free")
+  // Stripe Customer ID, captured on first checkout so a later
+  // customer.subscription.deleted event (which has no client_reference_id)
+  // can still be matched back to this shop.
+  stripeCustomerId String?
   installedAt    DateTime  @default(now())
   uninstalledAt  DateTime?
   updatedAt      DateTime  @updatedAt
