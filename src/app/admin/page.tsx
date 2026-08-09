@@ -21,14 +21,47 @@ export default async function AdminPage() {
     );
   }
 
+  const plans = [
+    { name: "Starter", price: "$12/mo", url: process.env.STRIPE_PAYMENT_LINK_STARTER },
+    { name: "Growth", price: "$29/mo", url: process.env.STRIPE_PAYMENT_LINK_GROWTH },
+    { name: "Business", price: "$59/mo", url: process.env.STRIPE_PAYMENT_LINK_BUSINESS },
+  ].filter((plan): plan is { name: string; price: string; url: string } => Boolean(plan.url));
+
   return (
-    <AdminSettingsForm
-      domain={shop.domain}
-      initialSourceLocale={shop.sourceLocale}
-      initialEnabledLocales={JSON.parse(shop.enabledLocales || "[]")}
-      initialAutoDetect={shop.autoDetect}
-      initialAutoWarmOnFirstUse={shop.autoWarmOnFirstUse}
-      providerSupportedLocales={getProviderSupportedLocales()}
-    />
+    <>
+      <AdminSettingsForm
+        domain={shop.domain}
+        initialSourceLocale={shop.sourceLocale}
+        initialEnabledLocales={JSON.parse(shop.enabledLocales || "[]")}
+        initialAutoDetect={shop.autoDetect}
+        initialAutoWarmOnFirstUse={shop.autoWarmOnFirstUse}
+        providerSupportedLocales={getProviderSupportedLocales()}
+      />
+      {plans.length > 0 && (
+        <section style={{ maxWidth: 720, margin: "0 auto 40px", padding: "0 24px" }}>
+          <h2 style={{ fontSize: 18 }}>Upgrade plan</h2>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {plans.map((plan) => (
+              <a
+                key={plan.name}
+                href={`${plan.url}?client_reference_id=${encodeURIComponent(shop.domain)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "block",
+                  padding: "10px 16px",
+                  border: "1px solid #ddd",
+                  borderRadius: 6,
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                <strong>{plan.name}</strong> &mdash; {plan.price}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
   );
 }
