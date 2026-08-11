@@ -8,6 +8,7 @@ import { localeLimitForPlan, planLabel } from "@/lib/plans";
 
 interface Props {
   domain: string;
+  appUrl: string;
   initialSourceLocale: string;
   initialEnabledLocales: string[];
   initialAutoDetect: boolean;
@@ -19,6 +20,7 @@ interface Props {
 
 export function AdminSettingsForm({
   domain,
+  appUrl,
   initialSourceLocale,
   initialEnabledLocales,
   initialAutoDetect,
@@ -67,10 +69,10 @@ export function AdminSettingsForm({
     );
   }, [selectableLanguages, filter]);
 
-  const embedSnippet =
-    typeof window !== "undefined"
-      ? `<script src="${window.location.origin}/widget/translator.js" data-shop="${domain}" async></script>`
-      : "";
+  // Derived from the server-known app URL, not window.location.origin —
+  // that would differ between SSR (no window) and the client, causing a
+  // hydration text mismatch (React error #418) on every render.
+  const embedSnippet = `<script src="${appUrl}/widget/translator.js" data-shop="${domain}" async></script>`;
 
   function toggle(code: string) {
     setEnabled((prev) => {

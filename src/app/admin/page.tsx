@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSessionShop } from "@/lib/adminAuth";
 import { getProviderSupportedLocales } from "@/lib/translation";
+import { easystoreConfig } from "@/lib/easystore/config";
 import { AdminSettingsForm } from "./AdminSettingsForm";
 
 export default async function AdminPage() {
@@ -33,6 +34,7 @@ export default async function AdminPage() {
     <>
       <AdminSettingsForm
         domain={shop.domain}
+        appUrl={easystoreConfig.appUrl}
         initialSourceLocale={shop.sourceLocale}
         initialEnabledLocales={JSON.parse(shop.enabledLocales || "[]")}
         initialAutoDetect={shop.autoDetect}
