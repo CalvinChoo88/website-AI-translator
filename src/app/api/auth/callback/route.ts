@@ -49,7 +49,12 @@ export async function GET(req: NextRequest) {
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
-    sameSite: "lax",
+    // "none" (not "lax") because EasyStore can load /admin inside an
+    // iframe on admin.easystore.co when "Embedded in EasyStore Control
+    // Panel" is enabled — that's a cross-site request from the
+    // browser's point of view, and "lax" cookies are withheld there.
+    // Requires secure:true, which is already set.
+    sameSite: "none",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });

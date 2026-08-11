@@ -39,7 +39,10 @@ export async function GET(req: NextRequest) {
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       secure: true,
-      sameSite: "lax",
+      // See the matching comment in api/auth/callback — must be "none"
+      // (with secure:true) so the cookie still gets sent when EasyStore
+      // loads /admin inside an iframe on its own domain.
+      sameSite: "none",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     });
