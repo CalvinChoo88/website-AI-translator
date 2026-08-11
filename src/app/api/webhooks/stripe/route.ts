@@ -49,21 +49,24 @@ function planForPaymentLinkId(paymentLinkId: string | null): Plan | null {
 async function handleCheckoutCompleted(session: Record<string, unknown>) {
   if (session.mode !== "subscription") return;
 
-  const shopDomain = typeof session.client_reference_id === "string" ? session.client_reference_id : null;
+  // shop.id (a plain alphanumeric cuid), not shop.domain — Stripe's
+  // client_reference_id silently drops values with characters outside
+  // alphanumeric/dash/underscore, and every shop domain contains dots.
+  const shopId = typeof session.client_reference_id === "string" ? session.client_reference_id : null;
   const paymentLinkId = typeof session.payment_link === "string" ? session.payment_link : null;
   const plan = planForPaymentLinkId(paymentLinkId);
   const stripeCustomerId = typeof session.customer === "string" ? session.customer : null;
 
-  if (!shopDomain || !plan) {
+  if (!shopId || !plan) {
     console.error(
-      "[webhooks/stripe] checkout.session.completed missing shop domain or unrecognized payment link",
-      { shopDomain, paymentLinkId },
+      "[webhooks/stripe] checkout.session.completed missing shop id or unrecognized payment link",
+      { shopId, paymentLinkId },
     );
     return;
   }
 
   await db.shop.updateMany({
-    where: { domain: shopDomain },
+    where: { id: shopId },
     data: { plan, ...(stripeCustomerId && { stripeCustomerId }) },
   });
 }

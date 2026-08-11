@@ -64,7 +64,12 @@ export default async function AdminPage() {
               ) : (
                 <a
                   key={plan.key}
-                  href={`${plan.url}?client_reference_id=${encodeURIComponent(shop.domain)}`}
+                  // Stripe's client_reference_id only allows
+                  // alphanumeric/dash/underscore and silently drops
+                  // anything else — a domain (which always has dots)
+                  // gets discarded, so shop.id (a plain alphanumeric
+                  // cuid) is used instead. See webhooks/stripe/route.ts.
+                  href={`${plan.url}?client_reference_id=${shop.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
