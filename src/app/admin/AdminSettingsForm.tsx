@@ -164,9 +164,14 @@ export function AdminSettingsForm({
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1>Translation settings</h1>
-        <Link href="/admin/faq" style={{ fontSize: 14 }}>
-          FAQ
-        </Link>
+        <div style={{ display: "flex", gap: 16 }}>
+          <a href="https://admin.easystore.co/apps" style={{ fontSize: 14 }}>
+            &larr; Back to EasyStore admin
+          </a>
+          <Link href="/admin/faq" style={{ fontSize: 14 }}>
+            FAQ
+          </Link>
+        </div>
       </div>
       <p style={{ color: "#555" }}>
         Store: <strong>{domain}</strong> &middot; Source language:{" "}
