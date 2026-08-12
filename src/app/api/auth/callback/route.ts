@@ -19,14 +19,29 @@ export async function GET(req: NextRequest) {
   }
 
   const { access_token, scope } = await exchangeCodeForToken(shopDomain, code);
+  const client = new EasyStoreAdminClient(shopDomain, access_token);
 
   let sourceLocale = "en";
   try {
-    const client = new EasyStoreAdminClient(shopDomain, access_token);
     const { store } = await client.getStore();
     if (store.language) sourceLocale = store.language;
   } catch {
     // Non-fatal — fall back to "en" and let the merchant correct it in settings.
+  }
+
+  try {
+    // Re-subscribed on every install/reinstall, not just the first —
+    // cheap idempotency isn't available without a list-webhooks call
+    // to dedupe against, and a stray duplicate subscription is harmless
+    // (our receiving endpoint is idempotent: it just sets a timestamp).
+    // Topic is "app/uninstall", NOT "app/uninstalled" — this webhook
+    // was never actually registered before, silently, because nothing
+    // called this API at all.
+    await client.createWebhook("app/uninstall", `${easystoreConfig.appUrl}/api/webhooks/app-uninstalled`);
+  } catch (err) {
+    // Non-fatal — install still succeeds, but log loudly since a
+    // failure here means uninstalls won't be detected for this shop.
+    console.error("[auth/callback] failed to register app/uninstall webhook", err);
   }
 
   const shop = await db.shop.upsert({

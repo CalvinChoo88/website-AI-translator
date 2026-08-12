@@ -3,13 +3,17 @@ import { verifyWebhookHmac } from "@/lib/easystore/webhooks";
 import { db } from "@/lib/db";
 
 /**
- * Register this URL in the Partner Dashboard for the "app/uninstalled"
- * topic. The exact header EasyStore uses to carry the shop domain
- * wasn't reachable in their docs during development (403'd), so this
- * reads the domain out of the JSON body instead, which is the more
- * platform-agnostic path — confirm the payload shape against
- * https://developers.easystore.co/docs/api/webhooks and adjust the
- * `domain`/`shop` field lookup below if it differs.
+ * Receives the "app/uninstall" topic (confirmed via EasyStore's
+ * Postman docs — note no trailing "-ed", unlike this route's own
+ * name/path). There's no Partner Dashboard field for registering
+ * this — it's subscribed via POST /api/3.0/webhooks.json, called from
+ * api/auth/callback right after OAuth completes. The exact JSON body
+ * shape EasyStore posts here on a real uninstall was still unconfirmed
+ * as of this comment (their webhooks docs page 403'd during
+ * development), so the `domain`/`shop` field lookup below is a
+ * best-effort guess — the logging above will show the real shape from
+ * the next actual uninstall event, if this fallback ever needs
+ * adjusting.
  */
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();

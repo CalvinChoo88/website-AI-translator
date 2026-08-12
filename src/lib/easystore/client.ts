@@ -39,4 +39,17 @@ export class EasyStoreAdminClient {
   getStore(): Promise<{ store: { name: string; domain: string; language?: string } }> {
     return this.get("store.json");
   }
+
+  /**
+   * Subscribes this shop to a webhook topic. Confirmed against
+   * EasyStore's Postman docs: POST /api/3.0/webhooks.json with
+   * {"webhook": {"topic": "...", "url": "..."}}. Note the uninstall
+   * topic is "app/uninstall" — no trailing "-ed".
+   */
+  createWebhook(topic: string, url: string): Promise<{ webhook: { id: number } }> {
+    return this.request("webhooks.json", {
+      method: "POST",
+      body: JSON.stringify({ webhook: { topic, url } }),
+    });
+  }
 }
