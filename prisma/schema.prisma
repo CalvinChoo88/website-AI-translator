@@ -43,6 +43,12 @@ model Shop {
   // Mirrors the Stripe Subscription's own `status` (e.g. "active",
   // "past_due", "canceled") — synced from customer.subscription.updated.
   subscriptionStatus  String?
+  // When the current subscription began (Stripe's fixed `start_date`,
+  // not the rolling current-period start) — shown as "Started" on
+  // /admin/subscription. Estimated from the checkout itself, then
+  // corrected with the authoritative value on the next
+  // customer.subscription.updated.
+  subscriptionStartDate DateTime?
   // Renewal/expiry date of the current billing period, synced from the
   // same event. Used to show an "expiring soon" reminder before the
   // next charge, and to know when a scheduled cancellation takes effect.

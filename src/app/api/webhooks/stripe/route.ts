@@ -60,6 +60,10 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
   const plan = planForPaymentLinkId(paymentLinkId);
   const stripeCustomerId = typeof session.customer === "string" ? session.customer : null;
   const stripeSubscriptionId = typeof session.subscription === "string" ? session.subscription : null;
+  // Session.created is a close-enough estimate of the subscription's
+  // start_date to show right away — customer.subscription.updated
+  // corrects it with the authoritative value once that fires.
+  const createdUnix = typeof session.created === "number" ? session.created : null;
 
   if (!shopId || !plan) {
     console.error(
@@ -75,6 +79,8 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
       plan,
       ...(stripeCustomerId && { stripeCustomerId }),
       ...(stripeSubscriptionId && { stripeSubscriptionId }),
+      ...(createdUnix && { subscriptionStartDate: new Date(createdUnix * 1000) }),
+      cancelAtPeriodEnd: false,
     },
   });
 }
@@ -95,6 +101,10 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
 
   const stripeSubscriptionId = typeof subscription.id === "string" ? subscription.id : null;
   const status = typeof subscription.status === "string" ? subscription.status : null;
+  // Fixed subscription start — unlike current_period_start, this
+  // doesn't move forward on renewal. Confirmed present at the top
+  // level in a real payload.
+  const startDateUnix = typeof subscription.start_date === "number" ? subscription.start_date : null;
 
   // current_period_end lives on each subscription item, not the
   // subscription itself, in this API version — confirmed from a real
@@ -114,13 +124,19 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
     data: {
       ...(stripeSubscriptionId && { stripeSubscriptionId }),
       ...(status && { subscriptionStatus: status }),
+      ...(startDateUnix && { subscriptionStartDate: new Date(startDateUnix * 1000) }),
       ...(typeof periodEndUnix === "number" && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
       cancelAtPeriodEnd,
     },
   });
 }
 
-/** Subscription fully ended (canceled, or payment ultimately failed) — drop back to free. */
+/**
+ * Fires once the period a cancelled subscription was already paid
+ * through actually ends (Stripe finalizes cancel_at_period_end
+ * automatically) — this, not the cancel button itself, is what
+ * actually drops the shop to Free.
+ */
 async function handleSubscriptionDeleted(subscription: Record<string, unknown>) {
   const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : null;
   if (!stripeCustomerId) return;
@@ -130,6 +146,7 @@ async function handleSubscriptionDeleted(subscription: Record<string, unknown>) 
     data: {
       plan: "free",
       subscriptionStatus: null,
+      subscriptionStartDate: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       stripeSubscriptionId: null,

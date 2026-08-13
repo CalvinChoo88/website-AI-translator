@@ -28,5 +28,14 @@ export default async function SubscriptionPage() {
     (plan): plan is { key: string; name: string; price: string; url: string } => Boolean(plan.url),
   );
 
-  return <SubscriptionManager shopId={shop.id} initialPlan={shop.plan} plans={plans} />;
+  return (
+    <SubscriptionManager
+      shopId={shop.id}
+      initialPlan={shop.plan}
+      subscriptionStartDate={shop.subscriptionStartDate ? shop.subscriptionStartDate.toISOString() : null}
+      currentPeriodEnd={shop.currentPeriodEnd ? shop.currentPeriodEnd.toISOString() : null}
+      initialCancelAtPeriodEnd={shop.cancelAtPeriodEnd}
+      plans={plans}
+    />
+  );
 }

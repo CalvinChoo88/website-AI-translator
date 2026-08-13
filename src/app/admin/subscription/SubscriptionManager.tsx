@@ -15,16 +15,41 @@ interface PlanOption {
 interface Props {
   shopId: string;
   initialPlan: string;
+  subscriptionStartDate: string | null;
+  currentPeriodEnd: string | null;
+  initialCancelAtPeriodEnd: boolean;
   plans: PlanOption[];
 }
 
 type ModalStep = "confirm" | "reason" | "canceling" | "done" | "error";
 
-export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
-  const [plan, setPlan] = useState(initialPlan);
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function SubscriptionManager({
+  shopId,
+  initialPlan,
+  subscriptionStartDate,
+  currentPeriodEnd,
+  initialCancelAtPeriodEnd,
+  plans,
+}: Props) {
+  const plan = initialPlan;
+  const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(initialCancelAtPeriodEnd);
   const [modalStep, setModalStep] = useState<ModalStep | null>(null);
   const [reason, setReason] = useState<CancellationReason | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const startDateLabel = formatDate(subscriptionStartDate);
+  const endDateLabel = formatDate(currentPeriodEnd);
 
   function openCancelFlow() {
     setReason(null);
@@ -46,7 +71,7 @@ export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
         body: JSON.stringify({ reason }),
       });
       if (res.ok) {
-        setPlan("free");
+        setCancelAtPeriodEnd(true);
         setModalStep("done");
       } else {
         const body = await res.json().catch(() => null);
@@ -88,11 +113,15 @@ export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
           >
             {modalStep === "confirm" && (
               <>
-                <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>Cancel your {planLabel(plan)} plan?</h2>
+                <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>
+                  Turn off auto-renewal for {planLabel(plan)}?
+                </h2>
                 <p style={{ color: "#555", margin: "0 0 20px" }}>
-                  This cancels future billing only — your current subscription period has
-                  already been paid and is non-refundable. You&rsquo;ll move to the Free
-                  plan immediately.
+                  This stops future billing only — you&rsquo;ll keep {planLabel(plan)}{" "}
+                  access until{" "}
+                  {endDateLabel ? <strong>{endDateLabel}</strong> : "the end of your current period"}
+                  , then move to Free automatically unless you upgrade again before then. Your
+                  current subscription period has already been paid and is non-refundable.
                 </p>
                 <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
                   <button onClick={closeModal} style={secondaryButtonStyle}>
@@ -153,9 +182,12 @@ export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
 
             {modalStep === "done" && (
               <>
-                <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>Subscription cancelled</h2>
+                <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>Auto-renewal turned off</h2>
                 <p style={{ color: "#555", margin: "0 0 20px" }}>
-                  You&rsquo;re now on the Free plan. You can resubscribe any time from this page.
+                  You&rsquo;ll keep {planLabel(plan)} access until{" "}
+                  {endDateLabel ? <strong>{endDateLabel}</strong> : "your current period ends"}, then
+                  move to the Free plan automatically. You can upgrade again any time before then to
+                  keep your plan running.
                 </p>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button onClick={closeModal} style={dangerButtonStyleInverted}>
@@ -174,9 +206,39 @@ export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
           &larr; Back to settings
         </Link>
       </div>
-      <p style={{ color: "#555" }}>
+      <p style={{ color: "#555", margin: "4px 0" }}>
         Current plan: <strong>{planLabel(plan)}</strong>
       </p>
+      {plan !== "free" && (startDateLabel || endDateLabel) && (
+        <p style={{ color: "#777", fontSize: 13, margin: "4px 0 16px" }}>
+          {startDateLabel && (
+            <>
+              Started: <strong>{startDateLabel}</strong>
+            </>
+          )}
+          {startDateLabel && endDateLabel && " · "}
+          {endDateLabel && (
+            <>
+              {cancelAtPeriodEnd ? "Access ends" : "Renews"}: <strong>{endDateLabel}</strong>
+            </>
+          )}
+        </p>
+      )}
+      {cancelAtPeriodEnd && plan !== "free" && (
+        <p
+          style={{
+            color: "#92400e",
+            background: "#fffbeb",
+            border: "1px solid #b45309",
+            borderRadius: 6,
+            padding: "10px 14px",
+            fontSize: 14,
+          }}
+        >
+          Auto-renewal is off. You&rsquo;ll keep {planLabel(plan)} until{" "}
+          {endDateLabel ?? "your current period ends"}, then move to Free automatically.
+        </p>
+      )}
 
       <section style={{ margin: "24px 0" }}>
         <h2 style={{ fontSize: 18 }}>Plans</h2>
@@ -223,11 +285,11 @@ export function SubscriptionManager({ shopId, initialPlan, plans }: Props) {
         </div>
       </section>
 
-      {plan !== "free" && (
+      {plan !== "free" && !cancelAtPeriodEnd && (
         <section style={{ margin: "32px 0 0", paddingTop: 24, borderTop: "1px solid #eee" }}>
           <h2 style={{ fontSize: 18 }}>Cancel subscription</h2>
           <p style={{ color: "#777", fontSize: 14, marginBottom: 12 }}>
-            Move back to the Free plan and stop future billing.
+            Turn off auto-renewal — you&rsquo;ll keep your plan until the current period ends.
           </p>
           <button onClick={openCancelFlow} style={dangerButtonStyle}>
             Cancel subscription

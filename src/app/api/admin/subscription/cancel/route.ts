@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionShop } from "@/lib/adminAuth";
-import { cancelStripeSubscription } from "@/lib/stripe/api";
+import { scheduleStripeSubscriptionCancellation } from "@/lib/stripe/api";
 import { isCancellationReason } from "@/lib/cancellationReasons";
 
 interface CancelBody {
@@ -9,10 +9,11 @@ interface CancelBody {
 }
 
 /**
- * Cancels immediately (not at period end) — the merchant drops back to
- * Free as soon as this succeeds. Already-paid time for the current
- * period is not refunded; the client is responsible for surfacing that
- * before calling this.
+ * Turns off auto-renewal — the shop keeps its current plan through the
+ * already-paid period. It's the later customer.subscription.deleted
+ * webhook (fired by Stripe once that period actually ends) that drops
+ * the shop to Free, not this route: if the merchant upgrades again
+ * before then, this cancellation simply never takes effect.
  */
 export async function POST(req: NextRequest) {
   const shop = await getSessionShop();
@@ -28,9 +29,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await cancelStripeSubscription(shop.stripeSubscriptionId);
+    await scheduleStripeSubscriptionCancellation(shop.stripeSubscriptionId);
   } catch (err) {
-    console.error("[api/admin/subscription/cancel] Stripe cancel failed", err);
+    console.error("[api/admin/subscription/cancel] Stripe schedule-cancel failed", err);
     return NextResponse.json({ error: "Failed to cancel subscription with Stripe" }, { status: 502 });
   }
 
@@ -38,15 +39,12 @@ export async function POST(req: NextRequest) {
     db.cancellationFeedback.create({
       data: { shopId: shop.id, plan: shop.plan, reason: body.reason },
     }),
+    // Optimistic — the next customer.subscription.updated will confirm
+    // this same value, but setting it here means /admin/subscription
+    // reflects it immediately instead of waiting on that webhook.
     db.shop.update({
       where: { id: shop.id },
-      data: {
-        plan: "free",
-        subscriptionStatus: null,
-        currentPeriodEnd: null,
-        cancelAtPeriodEnd: false,
-        stripeSubscriptionId: null,
-      },
+      data: { cancelAtPeriodEnd: true },
     }),
   ]);
 
