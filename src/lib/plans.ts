@@ -14,7 +14,7 @@ export const PLAN_LABELS: Record<Plan, string> = {
   elite: "Elite",
 };
 
-function isPlan(value: string): value is Plan {
+export function isPlan(value: string): value is Plan {
   return value in PLAN_LOCALE_LIMITS;
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { verifyStripeSignature } from "@/lib/stripe/webhook";
 import type { Plan } from "@/lib/plans";
+import { planForPriceId } from "@/lib/stripe/prices";
 
 /**
  * Register this URL in the Stripe dashboard (Developers > Webhooks) for
@@ -81,6 +82,9 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
       ...(stripeSubscriptionId && { stripeSubscriptionId }),
       ...(createdUnix && { subscriptionStartDate: new Date(createdUnix * 1000) }),
       cancelAtPeriodEnd: false,
+      // A fresh purchase supersedes any previously-scheduled switch.
+      pendingPlan: null,
+      stripeScheduleId: null,
     },
   });
 }
@@ -110,8 +114,18 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
   // subscription itself, in this API version — confirmed from a real
   // webhook payload where subscription.current_period_end was absent
   // but subscription.items.data[0].current_period_end had it.
-  const items = subscription.items as { data?: Array<{ current_period_end?: number }> } | undefined;
+  const items = subscription.items as
+    | { data?: Array<{ current_period_end?: number; price?: { id?: string } }> }
+    | undefined;
   const periodEndUnix = items?.data?.[0]?.current_period_end;
+
+  // Detects a Subscription Schedule's phase transition actually taking
+  // effect (the price on the subscription changed to a different known
+  // plan's price) as much as it detects anything else — this is what
+  // applies a pending plan switch scheduled from /admin/subscription,
+  // without any special-cased "is this a schedule transition" check.
+  const activePriceId = items?.data?.[0]?.price?.id ?? null;
+  const planFromPrice = planForPriceId(activePriceId ?? null);
 
   // Stripe represents a scheduled cancellation two ways: the classic
   // cancel_at_period_end boolean, or a specific cancel_at timestamp —
@@ -119,14 +133,26 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
   // but cancel_at was set (to the same timestamp as the period end).
   const cancelAtPeriodEnd = subscription.cancel_at_period_end === true || Boolean(subscription.cancel_at);
 
-  await db.shop.updateMany({
-    where: { stripeCustomerId },
+  const shop = await db.shop.findFirst({ where: { stripeCustomerId } });
+  if (!shop) return;
+
+  // Only clear the pending-switch bookkeeping once the active price
+  // actually matches what was pending — attaching a schedule fires its
+  // own update event immediately, while phase 1 (the OLD price) is
+  // still in effect, which would otherwise clear this prematurely,
+  // before the switch has really happened.
+  const pendingSwitchApplied = Boolean(planFromPrice) && planFromPrice === shop.pendingPlan;
+
+  await db.shop.update({
+    where: { id: shop.id },
     data: {
       ...(stripeSubscriptionId && { stripeSubscriptionId }),
       ...(status && { subscriptionStatus: status }),
       ...(startDateUnix && { subscriptionStartDate: new Date(startDateUnix * 1000) }),
       ...(typeof periodEndUnix === "number" && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
       cancelAtPeriodEnd,
+      ...(planFromPrice && { plan: planFromPrice }),
+      ...(pendingSwitchApplied && { pendingPlan: null, stripeScheduleId: null }),
     },
   });
 }
@@ -150,6 +176,8 @@ async function handleSubscriptionDeleted(subscription: Record<string, unknown>) 
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       stripeSubscriptionId: null,
+      pendingPlan: null,
+      stripeScheduleId: null,
     },
   });
 }

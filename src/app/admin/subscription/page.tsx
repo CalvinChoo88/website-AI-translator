@@ -35,6 +35,7 @@ export default async function SubscriptionPage() {
       subscriptionStartDate={shop.subscriptionStartDate ? shop.subscriptionStartDate.toISOString() : null}
       currentPeriodEnd={shop.currentPeriodEnd ? shop.currentPeriodEnd.toISOString() : null}
       initialCancelAtPeriodEnd={shop.cancelAtPeriodEnd}
+      initialPendingPlan={shop.pendingPlan}
       plans={plans}
     />
   );

@@ -57,6 +57,16 @@ model Shop {
   // Stripe customer portal) — still active until currentPeriodEnd,
   // but won't renew after that.
   cancelAtPeriodEnd   Boolean   @default(false)
+  // Set when a plan switch has been scheduled (via a Stripe Subscription
+  // Schedule) to take effect once the current period ends, instead of
+  // just lapsing to Free — e.g. switching from Elite to Starter while
+  // already mid-cancellation. Cleared once the webhook observes the new
+  // price actually take effect.
+  pendingPlan       String?
+  // The Subscription Schedule driving a pending plan switch, if any —
+  // not currently modified after creation, but kept for future use
+  // (e.g. cancelling a scheduled switch).
+  stripeScheduleId  String?
   installedAt    DateTime  @default(now())
   uninstalledAt  DateTime?
   updatedAt      DateTime  @updatedAt

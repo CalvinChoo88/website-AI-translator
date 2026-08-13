@@ -18,6 +18,7 @@ interface Props {
   subscriptionStartDate: string | null;
   currentPeriodEnd: string | null;
   initialCancelAtPeriodEnd: boolean;
+  initialPendingPlan: string | null;
   plans: PlanOption[];
 }
 
@@ -40,15 +41,19 @@ export function SubscriptionManager({
   subscriptionStartDate,
   currentPeriodEnd,
   initialCancelAtPeriodEnd,
+  initialPendingPlan,
   plans,
 }: Props) {
   const plan = initialPlan;
   const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(initialCancelAtPeriodEnd);
+  const [pendingPlan, setPendingPlan] = useState(initialPendingPlan);
   const [modalStep, setModalStep] = useState<ModalStep | null>(null);
   const [reason, setReason] = useState<CancellationReason | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [schedulingPlan, setSchedulingPlan] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const startDateLabel = formatDate(subscriptionStartDate);
   const endDateLabel = formatDate(currentPeriodEnd);
@@ -78,6 +83,28 @@ export function SubscriptionManager({
       setResumeError("Failed to resume subscription.");
     } finally {
       setResuming(false);
+    }
+  }
+
+  async function scheduleChange(newPlan: string) {
+    setSchedulingPlan(newPlan);
+    setScheduleError(null);
+    try {
+      const res = await fetch("/api/admin/subscription/schedule-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: newPlan }),
+      });
+      if (res.ok) {
+        setPendingPlan(newPlan);
+      } else {
+        const body = await res.json().catch(() => null);
+        setScheduleError(body?.error ?? "Failed to schedule the plan change.");
+      }
+    } catch {
+      setScheduleError("Failed to schedule the plan change.");
+    } finally {
+      setSchedulingPlan(null);
     }
   }
 
@@ -140,8 +167,9 @@ export function SubscriptionManager({
                   This stops future billing only — you&rsquo;ll keep {planLabel(plan)}{" "}
                   access until{" "}
                   {endDateLabel ? <strong>{endDateLabel}</strong> : "the end of your current period"}
-                  , then move to Free automatically unless you upgrade again before then. Your
-                  current subscription period has already been paid and is non-refundable.
+                  , then move to Free automatically unless you switch to another plan before
+                  then. Your current subscription period has already been paid and is
+                  non-refundable.
                 </p>
                 <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
                   <button onClick={closeModal} style={secondaryButtonStyle}>
@@ -206,8 +234,8 @@ export function SubscriptionManager({
                 <p style={{ color: "#555", margin: "0 0 20px" }}>
                   You&rsquo;ll keep {planLabel(plan)} access until{" "}
                   {endDateLabel ? <strong>{endDateLabel}</strong> : "your current period ends"}, then
-                  move to the Free plan automatically. You can upgrade again any time before then to
-                  keep your plan running.
+                  move to the Free plan automatically. You can resume this plan, or switch to
+                  another one, any time before then from this page.
                 </p>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button onClick={closeModal} style={dangerButtonStyleInverted}>
@@ -256,48 +284,116 @@ export function SubscriptionManager({
           }}
         >
           <p style={{ margin: "0 0 10px" }}>
-            Auto-renewal is off. You&rsquo;ll keep {planLabel(plan)} until{" "}
-            {endDateLabel ?? "your current period ends"}, then move to Free automatically.
+            {pendingPlan ? (
+              <>
+                Switching to <strong>{planLabel(pendingPlan)}</strong> on{" "}
+                {endDateLabel ?? "your current period end"} — you&rsquo;ll keep {planLabel(plan)}{" "}
+                until then.
+              </>
+            ) : (
+              <>
+                Auto-renewal is off. You&rsquo;ll keep {planLabel(plan)} until{" "}
+                {endDateLabel ?? "your current period ends"}, then move to Free automatically.
+              </>
+            )}
           </p>
-          {resumeError && <p style={{ color: "crimson", margin: "0 0 10px" }}>{resumeError}</p>}
-          <button
-            onClick={resumeSubscription}
-            disabled={resuming}
-            style={{
-              padding: "6px 14px",
-              background: "#111",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: resuming ? "default" : "pointer",
-              fontSize: 13,
-              opacity: resuming ? 0.6 : 1,
-            }}
-          >
-            {resuming ? "Resuming…" : `Resume ${planLabel(plan)} subscription`}
-          </button>
+          {!pendingPlan && (
+            <>
+              {resumeError && <p style={{ color: "crimson", margin: "0 0 10px" }}>{resumeError}</p>}
+              <button
+                onClick={resumeSubscription}
+                disabled={resuming}
+                style={{
+                  padding: "6px 14px",
+                  background: "#111",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: resuming ? "default" : "pointer",
+                  fontSize: 13,
+                  opacity: resuming ? 0.6 : 1,
+                }}
+              >
+                {resuming ? "Resuming…" : `Resume ${planLabel(plan)} subscription`}
+              </button>
+            </>
+          )}
         </div>
       )}
 
       <section style={{ margin: "24px 0" }}>
         <h2 style={{ fontSize: 18 }}>Plans</h2>
+        {scheduleError && <p style={{ color: "crimson", fontSize: 13 }}>{scheduleError}</p>}
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {plans.map((p) =>
-            p.key === plan ? (
-              <span
-                key={p.key}
-                style={{
-                  display: "block",
-                  padding: "10px 16px",
-                  border: "1px solid #111",
-                  borderRadius: 6,
-                  background: "#111",
-                  color: "#fff",
-                }}
-              >
-                <strong>{p.name}</strong> &mdash; {cancelAtPeriodEnd ? "Current plan, ending soon" : "Current plan"}
-              </span>
-            ) : (
+          {plans.map((p) => {
+            if (p.key === plan) {
+              return (
+                <span
+                  key={p.key}
+                  style={{
+                    display: "block",
+                    padding: "10px 16px",
+                    border: "1px solid #111",
+                    borderRadius: 6,
+                    background: "#111",
+                    color: "#fff",
+                  }}
+                >
+                  <strong>{p.name}</strong> &mdash;{" "}
+                  {cancelAtPeriodEnd ? "Current plan, ending soon" : "Current plan"}
+                </span>
+              );
+            }
+
+            if (p.key === pendingPlan) {
+              return (
+                <span
+                  key={p.key}
+                  style={{
+                    display: "block",
+                    padding: "10px 16px",
+                    border: "1px solid #b45309",
+                    borderRadius: 6,
+                    background: "#fffbeb",
+                    color: "#92400e",
+                  }}
+                >
+                  <strong>{p.name}</strong> &mdash; Starts {endDateLabel ?? "at period end"}
+                </span>
+              );
+            }
+
+            // Mid-cancellation and this tier isn't already the pending
+            // switch: offer scheduling a switch to it (keeps current
+            // plan's access, no new charge until the switch date)
+            // instead of a Payment Link, which would create a second,
+            // separate subscription with its own disconnected dates.
+            if (cancelAtPeriodEnd) {
+              const isScheduling = schedulingPlan === p.key;
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => scheduleChange(p.key)}
+                  disabled={Boolean(schedulingPlan) || Boolean(pendingPlan)}
+                  style={{
+                    display: "block",
+                    padding: "10px 16px",
+                    border: "1px solid #ddd",
+                    borderRadius: 6,
+                    background: "#fff",
+                    color: "inherit",
+                    cursor: schedulingPlan || pendingPlan ? "default" : "pointer",
+                    opacity: schedulingPlan && !isScheduling ? 0.5 : 1,
+                    fontSize: 14,
+                  }}
+                >
+                  <strong>{p.name}</strong> &mdash;{" "}
+                  {isScheduling ? "Scheduling…" : `Switch on ${endDateLabel ?? "period end"}`}
+                </button>
+              );
+            }
+
+            return (
               <a
                 key={p.key}
                 // Stripe's client_reference_id only allows
@@ -319,8 +415,8 @@ export function SubscriptionManager({
               >
                 <strong>{p.name}</strong> &mdash; {p.price}
               </a>
-            ),
-          )}
+            );
+          })}
         </div>
       </section>
 
