@@ -47,6 +47,8 @@ export function SubscriptionManager({
   const [modalStep, setModalStep] = useState<ModalStep | null>(null);
   const [reason, setReason] = useState<CancellationReason | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   const startDateLabel = formatDate(subscriptionStartDate);
   const endDateLabel = formatDate(currentPeriodEnd);
@@ -59,6 +61,24 @@ export function SubscriptionManager({
 
   function closeModal() {
     setModalStep(null);
+  }
+
+  async function resumeSubscription() {
+    setResuming(true);
+    setResumeError(null);
+    try {
+      const res = await fetch("/api/admin/subscription/resume", { method: "POST" });
+      if (res.ok) {
+        setCancelAtPeriodEnd(false);
+      } else {
+        const body = await res.json().catch(() => null);
+        setResumeError(body?.error ?? "Failed to resume subscription.");
+      }
+    } catch {
+      setResumeError("Failed to resume subscription.");
+    } finally {
+      setResuming(false);
+    }
   }
 
   async function confirmCancel() {
@@ -225,7 +245,7 @@ export function SubscriptionManager({
         </p>
       )}
       {cancelAtPeriodEnd && plan !== "free" && (
-        <p
+        <div
           style={{
             color: "#92400e",
             background: "#fffbeb",
@@ -235,9 +255,28 @@ export function SubscriptionManager({
             fontSize: 14,
           }}
         >
-          Auto-renewal is off. You&rsquo;ll keep {planLabel(plan)} until{" "}
-          {endDateLabel ?? "your current period ends"}, then move to Free automatically.
-        </p>
+          <p style={{ margin: "0 0 10px" }}>
+            Auto-renewal is off. You&rsquo;ll keep {planLabel(plan)} until{" "}
+            {endDateLabel ?? "your current period ends"}, then move to Free automatically.
+          </p>
+          {resumeError && <p style={{ color: "crimson", margin: "0 0 10px" }}>{resumeError}</p>}
+          <button
+            onClick={resumeSubscription}
+            disabled={resuming}
+            style={{
+              padding: "6px 14px",
+              background: "#111",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: resuming ? "default" : "pointer",
+              fontSize: 13,
+              opacity: resuming ? 0.6 : 1,
+            }}
+          >
+            {resuming ? "Resuming…" : `Resume ${planLabel(plan)} subscription`}
+          </button>
+        </div>
       )}
 
       <section style={{ margin: "24px 0" }}>
@@ -256,7 +295,7 @@ export function SubscriptionManager({
                   color: "#fff",
                 }}
               >
-                <strong>{p.name}</strong> &mdash; Current plan
+                <strong>{p.name}</strong> &mdash; {cancelAtPeriodEnd ? "Current plan, ending soon" : "Current plan"}
               </span>
             ) : (
               <a
