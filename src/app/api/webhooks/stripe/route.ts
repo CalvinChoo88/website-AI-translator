@@ -89,15 +89,25 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
   if (!stripeCustomerId) return;
 
   const status = typeof subscription.status === "string" ? subscription.status : null;
-  const periodEndUnix =
-    typeof subscription.current_period_end === "number" ? subscription.current_period_end : null;
-  const cancelAtPeriodEnd = subscription.cancel_at_period_end === true;
+
+  // current_period_end lives on each subscription item, not the
+  // subscription itself, in this API version — confirmed from a real
+  // webhook payload where subscription.current_period_end was absent
+  // but subscription.items.data[0].current_period_end had it.
+  const items = subscription.items as { data?: Array<{ current_period_end?: number }> } | undefined;
+  const periodEndUnix = items?.data?.[0]?.current_period_end;
+
+  // Stripe represents a scheduled cancellation two ways: the classic
+  // cancel_at_period_end boolean, or a specific cancel_at timestamp —
+  // confirmed from a real payload where cancel_at_period_end was false
+  // but cancel_at was set (to the same timestamp as the period end).
+  const cancelAtPeriodEnd = subscription.cancel_at_period_end === true || Boolean(subscription.cancel_at);
 
   await db.shop.updateMany({
     where: { stripeCustomerId },
     data: {
       ...(status && { subscriptionStatus: status }),
-      ...(periodEndUnix && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
+      ...(typeof periodEndUnix === "number" && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
       cancelAtPeriodEnd,
     },
   });
