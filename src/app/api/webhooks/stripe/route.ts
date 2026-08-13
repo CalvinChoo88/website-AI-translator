@@ -59,6 +59,7 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
   const paymentLinkId = typeof session.payment_link === "string" ? session.payment_link : null;
   const plan = planForPaymentLinkId(paymentLinkId);
   const stripeCustomerId = typeof session.customer === "string" ? session.customer : null;
+  const stripeSubscriptionId = typeof session.subscription === "string" ? session.subscription : null;
 
   if (!shopId || !plan) {
     console.error(
@@ -70,7 +71,11 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
 
   await db.shop.updateMany({
     where: { id: shopId },
-    data: { plan, ...(stripeCustomerId && { stripeCustomerId }) },
+    data: {
+      plan,
+      ...(stripeCustomerId && { stripeCustomerId }),
+      ...(stripeSubscriptionId && { stripeSubscriptionId }),
+    },
   });
 }
 
@@ -88,6 +93,7 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
   const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : null;
   if (!stripeCustomerId) return;
 
+  const stripeSubscriptionId = typeof subscription.id === "string" ? subscription.id : null;
   const status = typeof subscription.status === "string" ? subscription.status : null;
 
   // current_period_end lives on each subscription item, not the
@@ -106,6 +112,7 @@ async function handleSubscriptionUpdated(subscription: Record<string, unknown>) 
   await db.shop.updateMany({
     where: { stripeCustomerId },
     data: {
+      ...(stripeSubscriptionId && { stripeSubscriptionId }),
       ...(status && { subscriptionStatus: status }),
       ...(typeof periodEndUnix === "number" && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
       cancelAtPeriodEnd,
@@ -125,6 +132,7 @@ async function handleSubscriptionDeleted(subscription: Record<string, unknown>) 
       subscriptionStatus: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
+      stripeSubscriptionId: null,
     },
   });
 }

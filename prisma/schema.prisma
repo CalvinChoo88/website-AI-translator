@@ -36,6 +36,10 @@ model Shop {
   // customer.subscription.deleted event (which has no client_reference_id)
   // can still be matched back to this shop.
   stripeCustomerId String?
+  // The active subscription's ID — needed to call Stripe's cancel API
+  // directly from /admin/subscription (a Customer ID alone isn't enough
+  // to target a specific subscription for cancellation).
+  stripeSubscriptionId String?
   // Mirrors the Stripe Subscription's own `status` (e.g. "active",
   // "past_due", "canceled") — synced from customer.subscription.updated.
   subscriptionStatus  String?
@@ -53,6 +57,20 @@ model Shop {
 
   translations Translation[]
   localeWarms  LocaleWarm[]
+  cancellationFeedback CancellationFeedback[]
+}
+
+// One row per cancellation, kept even across a later resubscribe —
+// simple churn-reason history, not tied to the shop's current state.
+model CancellationFeedback {
+  id        String   @id @default(cuid())
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shopId    String
+  plan      String
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([shopId])
 }
 
 model Translation {

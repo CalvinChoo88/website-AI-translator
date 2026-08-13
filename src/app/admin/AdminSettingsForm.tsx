@@ -213,6 +213,9 @@ export function AdminSettingsForm({
           <a href="https://admin.easystore.co/apps" style={{ fontSize: 14 }}>
             &larr; Back to EasyStore admin
           </a>
+          <Link href="/admin/subscription" style={{ fontSize: 14 }}>
+            Manage subscription
+          </Link>
           <Link href="/admin/faq" style={{ fontSize: 14 }}>
             FAQ
           </Link>
