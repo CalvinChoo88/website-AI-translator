@@ -14,9 +14,19 @@ interface Props {
   initialAutoDetect: boolean;
   initialAutoWarmOnFirstUse: boolean;
   plan: string;
+  subscriptionStatus: string | null;
+  /** ISO string (Date objects aren't serializable across the server/client boundary). */
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
   /** null = provider supports the full catalog, no filtering needed. */
   providerSupportedLocales: string[] | null;
 }
+
+const BANNER_COLORS = {
+  urgent: { border: "#dc2626", background: "#fef2f2", text: "#991b1b" },
+  warning: { border: "#b45309", background: "#fffbeb", text: "#92400e" },
+  info: { border: "#2563eb", background: "#eff6ff", text: "#1e40af" },
+} as const;
 
 export function AdminSettingsForm({
   domain,
@@ -26,6 +36,9 @@ export function AdminSettingsForm({
   initialAutoDetect,
   initialAutoWarmOnFirstUse,
   plan,
+  subscriptionStatus,
+  currentPeriodEnd,
+  cancelAtPeriodEnd,
   providerSupportedLocales,
 }: Props) {
   const localeLimit = localeLimitForPlan(plan);
@@ -73,6 +86,38 @@ export function AdminSettingsForm({
   // that would differ between SSR (no window) and the client, causing a
   // hydration text mismatch (React error #418) on every render.
   const embedSnippet = `<script src="${appUrl}/widget/translator.js" data-shop="${domain}" async></script>`;
+
+  const billingBanner = useMemo(() => {
+    if (plan === "free") return null;
+
+    const periodEndDate = currentPeriodEnd ? new Date(currentPeriodEnd) : null;
+    const formattedDate = periodEndDate
+      ? periodEndDate.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+      : null;
+
+    if (subscriptionStatus === "past_due" || subscriptionStatus === "unpaid") {
+      return {
+        tone: "urgent" as const,
+        message: `We couldn't charge your card for the ${planLabel(plan)} plan${formattedDate ? ` (due ${formattedDate})` : ""}. Update your payment method in Stripe to avoid losing access.`,
+      };
+    }
+    if (cancelAtPeriodEnd && formattedDate) {
+      return {
+        tone: "warning" as const,
+        message: `Your ${planLabel(plan)} subscription is set to cancel on ${formattedDate} — you'll move to the Free plan after that.`,
+      };
+    }
+    if (periodEndDate && formattedDate && subscriptionStatus === "active") {
+      const daysUntil = (periodEndDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      if (daysUntil >= 0 && daysUntil <= 7) {
+        return {
+          tone: "info" as const,
+          message: `Your ${planLabel(plan)} subscription renews on ${formattedDate} — make sure the card on file in Stripe is still valid.`,
+        };
+      }
+    }
+    return null;
+  }, [plan, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd]);
 
   function toggle(code: string) {
     setEnabled((prev) => {
@@ -178,6 +223,22 @@ export function AdminSettingsForm({
         <strong>{sourceLocale}</strong> &middot; Plan: <strong>{planLabel(plan)}</strong>{" "}
         {localeLimit !== null && `(up to ${localeLimit} language${localeLimit === 1 ? "" : "s"})`}
       </p>
+
+      {billingBanner && (
+        <div
+          style={{
+            margin: "16px 0",
+            padding: "12px 16px",
+            borderRadius: 6,
+            border: `1px solid ${BANNER_COLORS[billingBanner.tone].border}`,
+            background: BANNER_COLORS[billingBanner.tone].background,
+            color: BANNER_COLORS[billingBanner.tone].text,
+            fontSize: 14,
+          }}
+        >
+          {billingBanner.message}
+        </div>
+      )}
 
       <section style={{ margin: "24px 0" }}>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>

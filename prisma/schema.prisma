@@ -36,6 +36,17 @@ model Shop {
   // customer.subscription.deleted event (which has no client_reference_id)
   // can still be matched back to this shop.
   stripeCustomerId String?
+  // Mirrors the Stripe Subscription's own `status` (e.g. "active",
+  // "past_due", "canceled") — synced from customer.subscription.updated.
+  subscriptionStatus  String?
+  // Renewal/expiry date of the current billing period, synced from the
+  // same event. Used to show an "expiring soon" reminder before the
+  // next charge, and to know when a scheduled cancellation takes effect.
+  currentPeriodEnd    DateTime?
+  // True once the merchant has scheduled cancellation (e.g. via the
+  // Stripe customer portal) — still active until currentPeriodEnd,
+  // but won't renew after that.
+  cancelAtPeriodEnd   Boolean   @default(false)
   installedAt    DateTime  @default(now())
   uninstalledAt  DateTime?
   updatedAt      DateTime  @updatedAt

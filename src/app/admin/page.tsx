@@ -40,6 +40,9 @@ export default async function AdminPage() {
         initialAutoDetect={shop.autoDetect}
         initialAutoWarmOnFirstUse={shop.autoWarmOnFirstUse}
         plan={shop.plan}
+        subscriptionStatus={shop.subscriptionStatus}
+        currentPeriodEnd={shop.currentPeriodEnd ? shop.currentPeriodEnd.toISOString() : null}
+        cancelAtPeriodEnd={shop.cancelAtPeriodEnd}
         providerSupportedLocales={getProviderSupportedLocales()}
       />
       {plans.length > 0 && (

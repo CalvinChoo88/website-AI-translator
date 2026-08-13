@@ -5,10 +5,11 @@ import type { Plan } from "@/lib/plans";
 
 /**
  * Register this URL in the Stripe dashboard (Developers > Webhooks) for
- * the checkout.session.completed and customer.subscription.deleted
- * events. A dashboard Payment Link never calls back into this app on
- * its own — this webhook is the only thing that turns "someone paid in
- * Stripe" into an actual plan change on the shop's row.
+ * the checkout.session.completed, customer.subscription.updated, and
+ * customer.subscription.deleted events. A dashboard Payment Link never
+ * calls back into this app on its own — this webhook is the only thing
+ * that turns "someone paid in Stripe" into an actual plan change (and
+ * renewal-date tracking) on the shop's row.
  */
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -28,6 +29,8 @@ export async function POST(req: NextRequest) {
 
   if (event.type === "checkout.session.completed") {
     await handleCheckoutCompleted(event.data.object);
+  } else if (event.type === "customer.subscription.updated") {
+    await handleSubscriptionUpdated(event.data.object);
   } else if (event.type === "customer.subscription.deleted") {
     await handleSubscriptionDeleted(event.data.object);
   }
@@ -71,6 +74,35 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
   });
 }
 
+/**
+ * Fires on renewal, a failed charge, a scheduled cancellation, and
+ * other subscription changes — this is where the renewal date and
+ * status shown in /admin get kept current. Not fired for the very
+ * first subscription of a new checkout in time to matter: stripeCustomerId
+ * isn't set until checkout.session.completed processes, and this event
+ * commonly arrives first — but it self-corrects by the next update
+ * (certainly by the first renewal), and a brand-new subscriber doesn't
+ * need an "expiring soon" reminder anyway.
+ */
+async function handleSubscriptionUpdated(subscription: Record<string, unknown>) {
+  const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : null;
+  if (!stripeCustomerId) return;
+
+  const status = typeof subscription.status === "string" ? subscription.status : null;
+  const periodEndUnix =
+    typeof subscription.current_period_end === "number" ? subscription.current_period_end : null;
+  const cancelAtPeriodEnd = subscription.cancel_at_period_end === true;
+
+  await db.shop.updateMany({
+    where: { stripeCustomerId },
+    data: {
+      ...(status && { subscriptionStatus: status }),
+      ...(periodEndUnix && { currentPeriodEnd: new Date(periodEndUnix * 1000) }),
+      cancelAtPeriodEnd,
+    },
+  });
+}
+
 /** Subscription fully ended (canceled, or payment ultimately failed) — drop back to free. */
 async function handleSubscriptionDeleted(subscription: Record<string, unknown>) {
   const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : null;
@@ -78,6 +110,11 @@ async function handleSubscriptionDeleted(subscription: Record<string, unknown>) 
 
   await db.shop.updateMany({
     where: { stripeCustomerId },
-    data: { plan: "free" },
+    data: {
+      plan: "free",
+      subscriptionStatus: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+    },
   });
 }
